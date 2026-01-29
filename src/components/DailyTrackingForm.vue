@@ -16,7 +16,7 @@ import { exerciseSuggestions } from '@/assets/exerciseSuggestions';
 import { musicSuggestions } from '@/assets/musicSuggestions';
 import { phaseSuggestions } from '@/assets/phaseSuggestions';
 import { gameSuggestions } from '@/assets/gameSuggestions';
-import { getTodayDate } from '@/lib/fieldUtils';
+import { getTodayDate, getYesterdayDate } from '@/lib/fieldUtils';
 
 const STORAGE_KEY = 'daily_tracking_form_data';
 
@@ -40,7 +40,8 @@ const formData = ref({
   phase: [] as string[],
   happened: '',
   time: '',
-  dayName: ''
+  dayName: '',
+  nap: 0
 });
 
 // Load from localStorage
@@ -49,6 +50,16 @@ const loadFormData = () => {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
+      // Ensure arrays are properly initialized
+      if (!parsed.grateful || !Array.isArray(parsed.grateful)) {
+        parsed.grateful = [];
+      }
+      if (!parsed.learn || !Array.isArray(parsed.learn)) {
+        parsed.learn = [];
+      }
+      if (!parsed.phase || !Array.isArray(parsed.phase)) {
+        parsed.phase = [];
+      }
       Object.assign(formData.value, parsed);
     }
   } catch (err) {
@@ -69,6 +80,34 @@ const saveFormData = () => {
 watch(formData, () => {
   saveFormData();
 }, { deep: true });
+
+// Watch grateful array specifically to ensure it saves
+watch(() => formData.value.grateful, () => {
+  saveFormData();
+}, { deep: true, immediate: false });
+
+// Also watch learn and phase arrays
+watch(() => formData.value.learn, () => {
+  saveFormData();
+}, { deep: true, immediate: false });
+
+watch(() => formData.value.phase, () => {
+  saveFormData();
+}, { deep: true, immediate: false });
+
+// Watch time field and set date to yesterday if time is between 00:00 and 12:00
+watch(() => formData.value.time, (newTime) => {
+  if (newTime) {
+    const timeMatch = newTime.match(/(\d{1,2}):?(\d{2})?/);
+    if (timeMatch) {
+      const hours = parseInt(timeMatch[1] || '0', 10);
+      if (hours >= 0 && hours < 12) {
+        // Time is between 00:00 and 11:59, set date to yesterday
+        formData.value.date = getYesterdayDate();
+      }
+    }
+  }
+});
 
 const setDateToToday = () => {
   formData.value.date = getTodayDate();
@@ -94,7 +133,8 @@ const clearForm = () => {
     phase: [],
     happened: '',
     time: '',
-    dayName: ''
+    dayName: '',
+    nap: 0
   };
   setDateToToday();
   localStorage.removeItem(STORAGE_KEY);
@@ -123,6 +163,7 @@ const whyFieldRef = ref<InstanceType<typeof StringField> | null>(null);
 const phaseFieldRef = ref<InstanceType<typeof AutocompleteListField> | null>(null);
 const happenedFieldRef = ref<InstanceType<typeof PatternTextField> | null>(null);
 const timeDisplayRef = ref<InstanceType<typeof TimeDisplay> | null>(null);
+const napFieldRef = ref<InstanceType<typeof TimeField> | null>(null);
 const dayNameFieldRef = ref<InstanceType<typeof StringField> | null>(null);
 
 const errorToFieldRef: Record<string, () => void> = {
@@ -187,6 +228,7 @@ const focusOrder = [
   () => batheFieldRef.value?.focus(),
   () => wakeFieldRef.value?.focus(),
   () => sleepFieldRef.value?.focus(),
+  () => napFieldRef.value?.focus(),
   () => stressFieldRef.value?.focus(),
   () => tiredFieldRef.value?.focus(),
   () => gameFieldRef.value?.focus(),
@@ -237,24 +279,57 @@ const moveToPreviousField = async (currentIndex: number) => {
 
 // Copy to clipboard
 const copySuccess = ref(false);
+const sleepTimeMessage = ref('');
 const copyToClipboard = async () => {
+  // Check if sleep time is in the past and update it
+  let sleepTime = formData.value.sleep;
+  if (sleepTime) {
+    const timeMatch = sleepTime.match(/(\d{1,2}):?(\d{2})?/);
+    if (timeMatch) {
+      const hours = parseInt(timeMatch[1] || '0', 10);
+      const minutes = parseInt(timeMatch[2] || '0', 10);
+
+      const now = new Date();
+      const sleepDate = new Date();
+      sleepDate.setHours(hours, minutes, 0, 0);
+
+      // Compare times on the same day - if sleep time has passed today, update it
+      const nowTime = now.getHours() * 60 + now.getMinutes();
+      const sleepTimeMinutes = hours * 60 + minutes;
+
+      // If sleep time is in the past (earlier today), set it to 10 minutes from now
+      if (sleepTimeMinutes < nowTime) {
+        const futureTime = new Date(now.getTime() + 10 * 60000); // 10 minutes from now
+        const futureHours = String(futureTime.getHours()).padStart(2, '0');
+        const futureMinutes = String(futureTime.getMinutes()).padStart(2, '0');
+        sleepTime = `${futureHours}:${futureMinutes}`;
+        formData.value.sleep = sleepTime;
+        sleepTimeMessage.value = 'Sleep time updated to 10 minutes from now';
+        setTimeout(() => {
+          sleepTimeMessage.value = '';
+        }, 3000);
+      }
+    }
+  }
+
   const values = [
     formData.value.date,
     formData.value.bathe,
     formData.value.wake,
-    formData.value.sleep,
+    sleepTime,
+    formData.value.nap,
     String(formData.value.stress),
     String(formData.value.tired),
     formData.value.game,
     formData.value.music,
-    formData.value.grateful.join(','),
-    formData.value.learn.join(','),
+    formData.value.grateful.join(', '),
+    formData.value.learn.join(', '),
     formData.value.exercise,
     String(formData.value.remember),
     String(formData.value.dayRating),
     String(formData.value.feeling),
     formData.value.why,
-    formData.value.phase.join(','),
+    formData.value.phase.join(', '),
     formData.value.time,
     formData.value.happened,
     formData.value.dayName
@@ -263,13 +338,66 @@ const copyToClipboard = async () => {
   const tabSeparated = values.join('\t');
 
   try {
-    await navigator.clipboard.writeText(tabSeparated);
-    copySuccess.value = true;
-    setTimeout(() => {
-      copySuccess.value = false;
-    }, 2000);
+    // Try modern clipboard API first
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(tabSeparated);
+      copySuccess.value = true;
+      setTimeout(() => {
+        copySuccess.value = false;
+      }, 2000);
+    } else {
+      // Fallback for mobile devices and older browsers
+      const textarea = document.createElement('textarea');
+      textarea.value = tabSeparated;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-999999px';
+      textarea.style.top = '-999999px';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+
+      try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+          copySuccess.value = true;
+          setTimeout(() => {
+            copySuccess.value = false;
+          }, 2000);
+        } else {
+          throw new Error('Copy command failed');
+        }
+      } catch (err) {
+        console.error('Failed to copy text: ', err);
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    }
   } catch (err) {
-    console.error('Failed to copy text: ', err);
+    // Fallback for mobile devices
+    const textarea = document.createElement('textarea');
+    textarea.value = tabSeparated;
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-999999px';
+    textarea.style.top = '-999999px';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+
+    try {
+      const successful = document.execCommand('copy');
+      if (successful) {
+        copySuccess.value = true;
+        setTimeout(() => {
+          copySuccess.value = false;
+        }, 2000);
+      } else {
+        console.error('Failed to copy text: Copy command failed');
+      }
+    } catch (fallbackErr) {
+      console.error('Failed to copy text: ', fallbackErr);
+    } finally {
+      document.body.removeChild(textarea);
+    }
   }
 };
 
@@ -321,27 +449,30 @@ onMounted(async () => {
                 :future-minutes="20" :required="true" :on-next="() => moveToNextField(2)"
                 :on-previous="() => moveToPreviousField(3)" />
 
+              <FloatField ref="napFieldRef" v-model="formData.nap" label="Nap" :max="10" :required="false"
+                :on-next="() => moveToNextField(3)" :on-previous="() => moveToPreviousField(3)" />
+
               <FloatField ref="stressFieldRef" v-model="formData.stress" label="Stress" :max="10" :required="true"
-                :on-next="() => moveToNextField(3)" :on-previous="() => moveToPreviousField(4)" />
+                :on-next="() => moveToNextField(4)" :on-previous="() => moveToPreviousField(4)" />
 
               <FloatField ref="tiredFieldRef" v-model="formData.tired" label="Tired" :max="10" :required="true"
-                :on-next="() => moveToNextField(4)" :on-previous="() => moveToPreviousField(5)" />
+                :on-next="() => moveToNextField(5)" :on-previous="() => moveToPreviousField(5)" />
 
               <AutocompleteField ref="gameFieldRef" v-model="formData.game" label="Game" :suggestions="gameSuggestions"
-                :required="false" :on-next="() => moveToNextField(5)" :on-previous="() => moveToPreviousField(6)" />
+                :required="false" :on-next="() => moveToNextField(6)" :on-previous="() => moveToPreviousField(6)" />
 
               <AutocompleteField ref="musicFieldRef" v-model="formData.music" label="Music"
-                :suggestions="musicSuggestions" :required="true" :on-next="() => moveToNextField(6)"
+                :suggestions="musicSuggestions" :required="true" :on-next="() => moveToNextField(7)"
                 :on-previous="() => moveToPreviousField(7)" />
 
               <ListField ref="gratefulFieldRef" v-model="formData.grateful" label="Grateful" :required="true"
-                :on-next="() => moveToNextField(7)" :on-previous="() => moveToPreviousField(8)" />
+                :on-next="() => moveToNextField(8)" :on-previous="() => moveToPreviousField(8)" />
 
               <ListField ref="learnFieldRef" v-model="formData.learn" label="Learn" :required="true"
-                :on-next="() => moveToNextField(8)" :on-previous="() => moveToPreviousField(9)" />
+                :on-next="() => moveToNextField(9)" :on-previous="() => moveToPreviousField(9)" />
 
               <AutocompleteField ref="exerciseFieldRef" v-model="formData.exercise" label="Exercise"
-                :suggestions="exerciseSuggestions" :required="true" :on-next="() => moveToNextField(9)"
+                :suggestions="exerciseSuggestions" :required="true" :on-next="() => moveToNextField(10)"
                 :on-previous="() => moveToPreviousField(10)" />
 
               <FloatField ref="rememberFieldRef" v-model="formData.remember" label="Remember" :max="10" :required="true"
@@ -360,15 +491,11 @@ onMounted(async () => {
                 :suggestions="phaseSuggestions" :required="true" :auto-select="false"
                 :on-next="() => moveToNextField(14)" :on-previous="() => moveToPreviousField(15)" />
 
-              <div class="d-flex align-center ga-2">
-                <div class="flex-grow-1">
-                  <PatternTextField ref="happenedFieldRef" v-model="formData.happened" label="Happened" :required="true"
-                    :on-next="() => moveToNextField(15)" :on-previous="() => moveToPreviousField(15)" />
-                </div>
-                <VBtn size="small" variant="outlined" @click="happenedFieldRef?.capitalize()">
-                  Capitalize
-                </VBtn>
-              </div>
+              <PatternTextField ref="happenedFieldRef" v-model="formData.happened" label="Happened" :required="true"
+                :on-next="() => moveToNextField(15)" :on-previous="() => moveToPreviousField(15)" />
+              <VBtn size="small" variant="outlined" @click="happenedFieldRef?.capitalize()">
+                Capitalize
+              </VBtn>
 
               <TimeDisplay ref="timeDisplayRef" v-model="formData.time" />
 
@@ -376,6 +503,13 @@ onMounted(async () => {
                 :on-next="focusClearButton" :on-previous="() => moveToPreviousField(17)" />
 
               <VDivider class="my-4" />
+
+              <!-- Sleep Time Message -->
+              <div v-if="sleepTimeMessage" class="mb-4">
+                <VChip color="info" variant="outlined" size="small">
+                  {{ sleepTimeMessage }}
+                </VChip>
+              </div>
 
               <!-- Validation Errors -->
               <div v-if="validationErrors.length > 0" class="mb-4">
@@ -391,14 +525,12 @@ onMounted(async () => {
               </div>
 
               <div class="d-flex justify-center flex-wrap ga-4">
-                <VBtn :color="copySuccess ? 'success' : 'primary'" size="large" class="text-h6"
-                  @click="copyToClipboard">
-                  <VIcon :icon="copySuccess ? 'mdi-check' : 'mdi-content-copy'" class="mr-2"></VIcon>
+                <VBtn :color="copySuccess ? 'success' : 'primary'" size="large" class="text-h6" @click="copyToClipboard"
+                  :prepend-icon="copySuccess ? 'mdi-check' : 'mdi-content-copy'">
                   {{ copySuccess ? 'Copied!' : 'Copy to Clipboard' }}
                 </VBtn>
-                <VBtn ref="clearButtonRef" color="error" size="large" class="text-h6" @click="clearForm"
-                  @keydown="handleClearButtonKeydown">
-                  <VIcon icon="mdi-delete" class="mr-2"></VIcon>
+                <VBtn ref="clearButtonRef" color="error" size="large" class="text-h6" prepend-icon="mdi-delete"
+                  @click="clearForm" @keydown="handleClearButtonKeydown">
                   Clear
                 </VBtn>
               </div>

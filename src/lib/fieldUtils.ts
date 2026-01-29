@@ -22,3 +22,9 @@ export const formatDate = (date: Date): string => {
 export const getTodayDate = (): string => {
   return formatDate(new Date());
 };
+
+export const getYesterdayDate = (): string => {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  return formatDate(yesterday);
+};

@@ -146,6 +146,6 @@ const handleInput = async (event: any): Promise<void> => {
 
 <template>
   <VTextarea ref="textareaRef" v-model="value" :label="label" variant="outlined" density="comfortable" class="text-h6"
-    :rules="required ? [(v: string) => !!v || 'Required'] : []" hide-details auto-grow rows="3" spellcheck="true"
+    :rules="required ? [(v: string) => !!v || 'Required'] : []" hide-details auto-grow rows="5" spellcheck="true"
     @input="handleInput" @keydown="handleTextareaKeydown" />
 </template>

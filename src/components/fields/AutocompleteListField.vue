@@ -86,7 +86,37 @@ const handleKeydown = async (event: KeyboardEvent, index: number) => {
   }
 };
 
-const updateItem = (index: number, value: string) => {
+const updateItem = async (index: number, value: string) => {
+  // Check if value contains a comma
+  if (value && value.includes(',')) {
+    const parts = value.split(',').map(p => p.trim()).filter(p => p !== '');
+    if (parts.length > 1) {
+      // Split the current item and add new items
+      const beforeItems = localItems.value.slice(0, index);
+      const afterItems = localItems.value.slice(index + 1);
+      const newItems = [...beforeItems, parts[0], ...parts.slice(1), ...afterItems];
+      localItems.value = newItems;
+      
+      // Update model value
+      const itemsToSave = localItems.value.filter((item, idx) => {
+        if (idx === localItems.value.length - 1 && item.trim() === '') {
+          return false;
+        }
+        return item.trim() !== '';
+      });
+      isInternalUpdate.value = true;
+      emit('update:modelValue', itemsToSave);
+      
+      // Focus on the next field after the last added item
+      await nextTick();
+      const nextIndex = index + parts.length - 1;
+      if (inputRefs.value[nextIndex]) {
+        await focusInput(inputRefs.value[nextIndex], 'input', false);
+      }
+      return;
+    }
+  }
+  
   if (index >= localItems.value.length) {
     localItems.value = [...localItems.value, ...Array(index - localItems.value.length + 1).fill('')];
   }
