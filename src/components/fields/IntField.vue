@@ -50,6 +50,18 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
 };
 
+// Handle blur event to ensure validation happens when user clicks away
+const handleBlur = () => {
+  // Trigger validation by updating the model value with the current value
+  const num = parseInt(stringValue.value, 10);
+  if (!isNaN(num)) {
+    const clamped = props.max !== undefined ? Math.min(Math.max(0, num), props.max) : num;
+    emit('update:modelValue', clamped);
+  } else if (stringValue.value === '') {
+    emit('update:modelValue', 0);
+  }
+};
+
 defineExpose({ focus });
 </script>
 
@@ -57,5 +69,5 @@ defineExpose({ focus });
   <VTextField ref="inputRef" v-model="stringValue" :label="label" type="number" :min="1" :max="max" variant="outlined"
     density="comfortable" class="text-h6"
     :rules="required ? [(v: string) => (v !== '' && parseInt(v, 10) >= 1) || 'Must be at least 1'] : []" hide-details
-    @keydown="handleKeydown" />
+    @keydown="handleKeydown" @blur="handleBlur" />
 </template>

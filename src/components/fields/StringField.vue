@@ -43,11 +43,17 @@ const handleKeydown = (event: KeyboardEvent) => {
   }
 };
 
+// Handle blur event to ensure validation happens when user clicks away
+const handleBlur = () => {
+  // Trigger validation by updating the model value with the current value
+  emit('update:modelValue', value.value);
+};
+
 defineExpose({ focus, capitalize });
 </script>
 
 <template>
   <VTextField ref="inputRef" v-model="value" :label="label" variant="outlined" density="comfortable" class="text-h6"
-    :rules="required ? [(v: string) => !!v || 'Required'] : []" hide-details spellcheck="true"
-    @keydown="handleKeydown" />
+    :rules="required ? [(v: string) => !!v || 'Required'] : []" hide-details spellcheck="true" @keydown="handleKeydown"
+    @blur="handleBlur" />
 </template>

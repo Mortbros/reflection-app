@@ -262,6 +262,9 @@ const moveToNextField = async (currentIndex: number) => {
       focusFn();
       await scrollToActiveElement();
     }
+  } else {
+    // If we reach the end of the form, copy to clipboard
+    copyToClipboard();
   }
 };
 
@@ -429,6 +432,17 @@ onMounted(async () => {
         <VCard variant="outlined" class="pa-6">
           <VCardText>
             <div class="d-flex flex-column ga-6">
+              <div class="d-flex justify-center flex-wrap ga-4 mb-4">
+                <VBtn :color="copySuccess ? 'success' : 'primary'" size="large" class="text-h6" @click="copyToClipboard"
+                  :prepend-icon="copySuccess ? 'mdi-check' : 'mdi-content-copy'">
+                  {{ copySuccess ? 'Copied!' : 'Copy to Clipboard' }}
+                </VBtn>
+                <VBtn ref="clearButtonRef" color="error" size="large" class="text-h6" prepend-icon="mdi-delete"
+                  @click="clearForm" @keydown="handleClearButtonKeydown">
+                  Clear
+                </VBtn>
+              </div>
+
               <div class="d-flex align-center ga-2">
                 <div class="flex-grow-1">
                   <DateField ref="dateFieldRef" v-model="formData.date" label="Date" :required="true"
@@ -500,7 +514,7 @@ onMounted(async () => {
               <TimeDisplay ref="timeDisplayRef" v-model="formData.time" />
 
               <StringField ref="dayNameFieldRef" v-model="formData.dayName" label="Day name" :required="false"
-                :on-next="focusClearButton" :on-previous="() => moveToPreviousField(17)" />
+                :on-next="copyToClipboard" :on-previous="() => moveToPreviousField(17)" />
 
               <VDivider class="my-4" />
 

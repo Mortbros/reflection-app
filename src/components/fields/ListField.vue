@@ -79,15 +79,15 @@ const handleKeydown = async (event: KeyboardEvent, index: number) => {
 
 const updateItem = async (index: number, value: string) => {
   // Check if value contains a comma
-  if (value.includes(',')) {
+  if (value && value.includes(',')) {
     const parts = value.split(',').map(p => p.trim()).filter(p => p !== '');
     if (parts.length > 1) {
       // Split the current item and add new items
       const beforeItems = localItems.value.slice(0, index);
       const afterItems = localItems.value.slice(index + 1);
-      const newItems = [...beforeItems, parts[0], ...parts.slice(1), ...afterItems];
-      localItems.value = newItems;
-      
+      const newItems = [...beforeItems, parts[0], ...parts.slice(1).filter(p => p !== ''), ...afterItems];
+      localItems.value = newItems as string[];
+
       // Update model value
       const itemsToSave = localItems.value.filter((item, idx) => {
         if (idx === localItems.value.length - 1 && item.trim() === '') {
@@ -97,7 +97,7 @@ const updateItem = async (index: number, value: string) => {
       });
       isInternalUpdate.value = true;
       emit('update:modelValue', itemsToSave);
-      
+
       // Focus on the next field after the last added item
       await nextTick();
       const nextIndex = index + parts.length - 1;
@@ -107,12 +107,25 @@ const updateItem = async (index: number, value: string) => {
       return;
     }
   }
-  
+
   if (index >= localItems.value.length) {
     localItems.value = [...localItems.value, ...Array(index - localItems.value.length + 1).fill('')];
   }
   localItems.value[index] = value;
   // Update model value (excluding the last empty field if it exists)
+  const itemsToSave = localItems.value.filter((item, idx) => {
+    if (idx === localItems.value.length - 1 && item.trim() === '') {
+      return false; // Don't save the trailing empty field
+    }
+    return item.trim() !== '';
+  });
+  isInternalUpdate.value = true;
+  emit('update:modelValue', itemsToSave);
+};
+
+// Handle blur event to ensure values are saved when user clicks away
+const handleBlur = (index: number) => {
+  // When a field loses focus, ensure its value is saved
   const itemsToSave = localItems.value.filter((item, idx) => {
     if (idx === localItems.value.length - 1 && item.trim() === '') {
       return false; // Don't save the trailing empty field
@@ -130,7 +143,7 @@ const updateItem = async (index: number, value: string) => {
       <VTextField :ref="(el) => { if (el) inputRefs[index] = el as InstanceType<typeof VTextField> }"
         :model-value="localItems[index]" :label="index === 0 ? label : ''" variant="outlined" density="comfortable"
         class="text-h6" hide-details spellcheck="true" @update:model-value="updateItem(index, $event)"
-        @keydown="handleKeydown($event, index)" />
+        @keydown="handleKeydown($event, index)" @blur="handleBlur(index)" />
     </div>
   </div>
 </template>
