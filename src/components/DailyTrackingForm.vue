@@ -6,6 +6,8 @@ import YesNoField from '@/components/fields/YesNoField.vue';
 import TimeField from '@/components/fields/TimeField.vue';
 import FloatField from '@/components/fields/FloatField.vue';
 import IntField from '@/components/fields/IntField.vue';
+
+
 import StringField from '@/components/fields/StringField.vue';
 import ListField from '@/components/fields/ListField.vue';
 import PatternTextField from '@/components/fields/PatternTextField.vue';
@@ -464,49 +466,49 @@ onMounted(async () => {
                 :on-previous="() => moveToPreviousField(3)" />
 
               <FloatField ref="napFieldRef" v-model="formData.nap" label="Nap" :max="10" :required="false"
-                :on-next="() => moveToNextField(3)" :on-previous="() => moveToPreviousField(3)" />
+                :on-next="() => moveToNextField(3)" :on-previous="() => moveToPreviousField(4)" />
 
               <FloatField ref="stressFieldRef" v-model="formData.stress" label="Stress" :max="10" :required="true"
-                :on-next="() => moveToNextField(4)" :on-previous="() => moveToPreviousField(4)" />
+                :on-next="() => moveToNextField(4)" :on-previous="() => moveToPreviousField(5)" />
 
               <FloatField ref="tiredFieldRef" v-model="formData.tired" label="Tired" :max="10" :required="true"
-                :on-next="() => moveToNextField(5)" :on-previous="() => moveToPreviousField(5)" />
+                :on-next="() => moveToNextField(5)" :on-previous="() => moveToPreviousField(6)" />
 
               <AutocompleteField ref="gameFieldRef" v-model="formData.game" label="Game" :suggestions="gameSuggestions"
-                :required="false" :on-next="() => moveToNextField(6)" :on-previous="() => moveToPreviousField(6)" />
+                :required="false" :on-next="() => moveToNextField(6)" :on-previous="() => moveToPreviousField(7)" />
 
               <AutocompleteField ref="musicFieldRef" v-model="formData.music" label="Music"
                 :suggestions="musicSuggestions" :required="true" :on-next="() => moveToNextField(7)"
-                :on-previous="() => moveToPreviousField(7)" />
+                :on-previous="() => moveToPreviousField(8)" />
 
               <ListField ref="gratefulFieldRef" v-model="formData.grateful" label="Grateful" :required="true"
-                :on-next="() => moveToNextField(8)" :on-previous="() => moveToPreviousField(8)" />
+                :on-next="() => moveToNextField(8)" :on-previous="() => moveToPreviousField(9)" />
 
               <ListField ref="learnFieldRef" v-model="formData.learn" label="Learn" :required="true"
-                :on-next="() => moveToNextField(9)" :on-previous="() => moveToPreviousField(9)" />
+                :on-next="() => moveToNextField(9)" :on-previous="() => moveToPreviousField(10)" />
 
               <AutocompleteField ref="exerciseFieldRef" v-model="formData.exercise" label="Exercise"
                 :suggestions="exerciseSuggestions" :required="true" :on-next="() => moveToNextField(10)"
-                :on-previous="() => moveToPreviousField(10)" />
+                :on-previous="() => moveToPreviousField(11)" />
 
               <FloatField ref="rememberFieldRef" v-model="formData.remember" label="Remember" :max="10" :required="true"
-                :on-next="() => moveToNextField(10)" :on-previous="() => moveToPreviousField(10)" />
+                :on-next="() => moveToNextField(11)" :on-previous="() => moveToPreviousField(12)" />
 
               <FloatField ref="dayRatingFieldRef" v-model="formData.dayRating" label="Day rating" :max="10"
-                :required="true" :on-next="() => moveToNextField(11)" :on-previous="() => moveToPreviousField(11)" />
+                :required="true" :on-next="() => moveToNextField(12)" :on-previous="() => moveToPreviousField(13)" />
 
               <IntField ref="feelingFieldRef" v-model="formData.feeling" label="Feeling" :max="100" :required="true"
-                :on-next="() => moveToNextField(12)" :on-previous="() => moveToPreviousField(12)" />
+                :on-next="() => moveToNextField(13)" :on-previous="() => moveToPreviousField(14)" />
 
               <StringField ref="whyFieldRef" v-model="formData.why" label="Why" :required="true"
-                :on-next="() => moveToNextField(13)" :on-previous="() => moveToPreviousField(13)" />
+                :on-next="() => moveToNextField(14)" :on-previous="() => moveToPreviousField(15)" />
 
               <AutocompleteListField ref="phaseFieldRef" v-model="formData.phase" label="Phase"
                 :suggestions="phaseSuggestions" :required="true" :auto-select="false"
-                :on-next="() => moveToNextField(14)" :on-previous="() => moveToPreviousField(15)" />
+                :on-next="() => moveToNextField(15)" :on-previous="() => moveToPreviousField(16)" />
 
               <PatternTextField ref="happenedFieldRef" v-model="formData.happened" label="Happened" :required="true"
-                :on-next="() => moveToNextField(15)" :on-previous="() => moveToPreviousField(15)" />
+                :on-next="() => moveToNextField(16)" :on-previous="() => moveToPreviousField(17)" />
               <VBtn size="small" variant="outlined" @click="happenedFieldRef?.capitalize()">
                 Capitalize
               </VBtn>
