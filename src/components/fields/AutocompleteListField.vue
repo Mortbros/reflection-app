@@ -65,7 +65,7 @@ const handleKeydown = async (event: KeyboardEvent, index: number) => {
     if (inputRefs.value[newIndex]) {
       await focusInput(inputRefs.value[newIndex], 'input', false);
     }
-  } else if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey) {
+  } else if ((event.key === 'Enter' && !event.shiftKey && !event.ctrlKey) || (event.key === 'Tab' && !event.shiftKey)) {
     event.preventDefault();
 
     if (index < localItems.value.length - 1) {
@@ -80,7 +80,7 @@ const handleKeydown = async (event: KeyboardEvent, index: number) => {
       emit('update:modelValue', itemsToSave);
       props.onNext?.();
     }
-  } else if (event.key === 'Enter' && event.shiftKey && index === 0) {
+  } else if (event.key === 'Tab' && event.shiftKey && index === 0) {
     event.preventDefault();
     props.onPrevious?.();
   }

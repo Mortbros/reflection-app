@@ -26,7 +26,7 @@ const focus = () => {
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Enter' && event.shiftKey) {
+  if (event.key === 'Tab' && event.shiftKey) {
     event.preventDefault();
     props.onPrevious?.();
   }

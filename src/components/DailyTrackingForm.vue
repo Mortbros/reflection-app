@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue';
-import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip, VIcon } from 'vuetify/components';
+import { ref, onMounted, nextTick, watch, useTemplateRef } from 'vue';
+import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip, VIcon, VForm } from 'vuetify/components';
 import DateField from '@/components/fields/DateField.vue';
 import YesNoField from '@/components/fields/YesNoField.vue';
 import TimeField from '@/components/fields/TimeField.vue';
@@ -28,6 +28,8 @@ const formData = ref({
   bathe: 'N',
   wake: '',
   sleep: '',
+  nap: 0,
+  worked: 0,
   stress: 0,
   tired: 0,
   game: 'N',
@@ -42,8 +44,7 @@ const formData = ref({
   phase: [] as string[],
   happened: '',
   time: '',
-  dayName: '',
-  nap: 0
+  dayName: ''
 });
 
 // Load from localStorage
@@ -121,6 +122,8 @@ const clearForm = () => {
     bathe: 'N',
     wake: '',
     sleep: '',
+    nap: 0,
+    worked: 0,
     stress: 0,
     tired: 0,
     game: 'N',
@@ -135,8 +138,7 @@ const clearForm = () => {
     phase: [],
     happened: '',
     time: '',
-    dayName: '',
-    nap: 0
+    dayName: ''
   };
   setDateToToday();
   localStorage.removeItem(STORAGE_KEY);
@@ -151,6 +153,8 @@ const dateFieldRef = ref<InstanceType<typeof DateField> | null>(null);
 const batheFieldRef = ref<InstanceType<typeof YesNoField> | null>(null);
 const wakeFieldRef = ref<InstanceType<typeof TimeField> | null>(null);
 const sleepFieldRef = ref<InstanceType<typeof TimeField> | null>(null);
+const napFieldRef = ref<InstanceType<typeof FloatField> | null>(null);
+const workedFieldRef = ref<InstanceType<typeof FloatField> | null>(null);
 const stressFieldRef = ref<InstanceType<typeof FloatField> | null>(null);
 const tiredFieldRef = ref<InstanceType<typeof FloatField> | null>(null);
 const gameFieldRef = ref<InstanceType<typeof AutocompleteField> | null>(null);
@@ -165,7 +169,6 @@ const whyFieldRef = ref<InstanceType<typeof StringField> | null>(null);
 const phaseFieldRef = ref<InstanceType<typeof AutocompleteListField> | null>(null);
 const happenedFieldRef = ref<InstanceType<typeof PatternTextField> | null>(null);
 const timeDisplayRef = ref<InstanceType<typeof TimeDisplay> | null>(null);
-const napFieldRef = ref<InstanceType<typeof TimeField> | null>(null);
 const dayNameFieldRef = ref<InstanceType<typeof StringField> | null>(null);
 
 const errorToFieldRef: Record<string, () => void> = {
@@ -225,12 +228,66 @@ watch(formData, () => {
   validateForm();
 }, { deep: true, immediate: true });
 
+// const formRef = useTemplateRef<VForm>('formRef');
+
+// const formRefs = {
+//   "date": useTemplateRef<typeof DateField>('dateRef'),
+//   "bathe": useTemplateRef<typeof YesNoField>('batheRef'),
+//   "wake": useTemplateRef<typeof TimeField>('wakeRef'),
+//   "sleep": useTemplateRef<typeof TimeField>('sleepRef'),
+//   "nap": useTemplateRef<typeof FloatField>('napRef'),
+//   "worked": useTemplateRef<typeof FloatField>('workedRef'),
+//   "stress": useTemplateRef<typeof FloatField>('stressRef'),
+//   "tired": useTemplateRef<typeof FloatField>('tiredRef'),
+//   "game": useTemplateRef<typeof AutocompleteField>('gameRef'),
+//   "music": useTemplateRef<typeof AutocompleteField>('musicRef'),
+//   "grateful": useTemplateRef<typeof AutocompleteField>('gratefulRef'),
+//   "learn": useTemplateRef<typeof ListField>('learnRef'),
+//   "exercise": useTemplateRef<typeof ListField>('exerciseRef'),
+//   "remember": useTemplateRef<typeof FloatField>('rememberRef'),
+//   "dayRating": useTemplateRef<typeof FloatField>('dayRatingRef'),
+//   "feeling": useTemplateRef<typeof IntField>('feelingRef'),
+//   "why": useTemplateRef<typeof StringField>('whyRef'),
+//   "phase": useTemplateRef<typeof AutocompleteListField>('phaseRef'),
+//   "happened": useTemplateRef<typeof PatternTextField>('happenedRef'),
+//   "time": useTemplateRef<typeof TimeDisplay>('timeRef'),
+//   "dayName": useTemplateRef<typeof StringField>('dayNameRef'),
+// }
+
+// async function focusRef(ref: keyof typeof formRefs) {
+//   nextTick(() => formRefs[ref].value?.focus());
+// }
+
+// const focusRules = {
+//   "date": () => { focusRef(''); },
+//   "bathe": () => { focusRef('bathe'); },
+//   "wake": () => { focusRef('wake'); },
+//   "sleep": () => { focusRef('sleep'); },
+//   "nap": () => { focusRef('nap'); },
+//   "worked": () => { focusRef('worked'); },
+//   "stress": () => { focusRef('stress'); },
+//   "tired": () => { focusRef('tired'); },
+//   "game": () => { focusRef('game'); },
+//   "music": () => { focusRef('music'); },
+//   "grateful": () => { focusRef('grateful'); },
+//   "learn": () => { focusRef('learn'); },
+//   "exercise": () => { focusRef('exercise'); },
+//   "remember": () => { focusRef('remember'); },
+//   "dayRating": () => { focusRef('dayRating'); },
+//   "feeling": () => { focusRef('feeling'); },
+//   "why": () => { focusRef('why'); },
+//   "phase": () => { focusRef('phase'); },
+//   "happened": () => { focusRef('happened'); },
+//   "time": () => { focusRef('time'); },
+//   "dayName": () => { focusRef('dayName'); },
+// }
 // Focus order array
 const focusOrder = [
   () => batheFieldRef.value?.focus(),
   () => wakeFieldRef.value?.focus(),
   () => sleepFieldRef.value?.focus(),
   () => napFieldRef.value?.focus(),
+  () => workedFieldRef.value?.focus(),
   () => stressFieldRef.value?.focus(),
   () => tiredFieldRef.value?.focus(),
   () => gameFieldRef.value?.focus(),
@@ -256,10 +313,9 @@ const scrollToActiveElement = async () => {
 };
 
 const moveToNextField = async (currentIndex: number) => {
-  const nextIndex = currentIndex + 1;
-  if (nextIndex < focusOrder.length) {
+  if (currentIndex < focusOrder.length) {
     await nextTick();
-    const focusFn = focusOrder[nextIndex];
+    const focusFn = focusOrder[currentIndex];
     if (focusFn) {
       focusFn();
       await scrollToActiveElement();
@@ -271,14 +327,12 @@ const moveToNextField = async (currentIndex: number) => {
 };
 
 const moveToPreviousField = async (currentIndex: number) => {
-  const prevIndex = currentIndex - 1;
-  if (prevIndex >= 0) {
-    await nextTick();
-    const focusFn = focusOrder[prevIndex];
-    if (focusFn) {
-      focusFn();
-      await scrollToActiveElement();
-    }
+  const prevIndex = currentIndex - 2 >= 0 ? currentIndex - 2 : 0;
+  await nextTick();
+  const focusFn = focusOrder[prevIndex];
+  if (focusFn) {
+    focusFn();
+    await scrollToActiveElement();
   }
 };
 
@@ -323,6 +377,7 @@ const copyToClipboard = async () => {
     formData.value.wake,
     sleepTime,
     formData.value.nap,
+    formData.value.worked,
     String(formData.value.stress),
     String(formData.value.tired),
     formData.value.game,
@@ -413,7 +468,7 @@ const focusClearButton = () => {
 };
 
 const handleClearButtonKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Enter') {
+  if (event.key === 'Enter' || (event.key === 'Tab' && !event.shiftKey)) {
     event.preventDefault();
     clearForm();
   }
@@ -448,7 +503,7 @@ onMounted(async () => {
               <div class="d-flex align-center ga-2">
                 <div class="flex-grow-1">
                   <DateField ref="dateFieldRef" v-model="formData.date" label="Date" :required="true"
-                    :on-previous="() => moveToPreviousField(0)" />
+                    :on-next="() => moveToNextField(0)" />
                 </div>
                 <VBtn size="small" variant="outlined" @click="setDateToToday">
                   Today
@@ -456,59 +511,68 @@ onMounted(async () => {
               </div>
 
               <YesNoField ref="batheFieldRef" v-model="formData.bathe" label="Bathe" :required="true"
-                :on-next="() => moveToNextField(0)" :on-previous="() => moveToPreviousField(1)" />
+                :on-next="() => moveToNextField(1)" :on-previous="() => moveToPreviousField(1)" />
 
-              <TimeField ref="wakeFieldRef" v-model="formData.wake" label="Wake" :required="true"
-                :on-next="() => moveToNextField(1)" :on-previous="() => moveToPreviousField(2)" />
+              <VRow>
+                <VCol>
+                  <TimeField ref="wakeFieldRef" v-model="formData.wake" label="Wake" :required="true"
+                    :on-next="() => moveToNextField(2)" :on-previous="() => moveToPreviousField(2)" />
 
-              <TimeField ref="sleepFieldRef" v-model="formData.sleep" label="Sleep" :default-to-future="true"
-                :future-minutes="20" :required="true" :on-next="() => moveToNextField(2)"
-                :on-previous="() => moveToPreviousField(3)" />
+                </VCol>
+                <VCol>
+                  <TimeField ref="sleepFieldRef" v-model="formData.sleep" label="Sleep" :default-to-future="true"
+                    :future-minutes="20" :required="true" :on-next="() => moveToNextField(3)"
+                    :on-previous="() => moveToPreviousField(3)" />
+                </VCol>
+              </VRow>
 
               <FloatField ref="napFieldRef" v-model="formData.nap" label="Nap" :max="10" :required="false"
-                :on-next="() => moveToNextField(3)" :on-previous="() => moveToPreviousField(4)" />
+                :on-next="() => moveToNextField(4)" :on-previous="() => moveToPreviousField(4)" />
+
+              <FloatField ref="workedFieldRef" v-model="formData.nap" label="Worked" :max="24" :required="false"
+                :on-next="() => moveToNextField(5)" :on-previous="() => moveToPreviousField(5)" />
 
               <FloatField ref="stressFieldRef" v-model="formData.stress" label="Stress" :max="10" :required="true"
-                :on-next="() => moveToNextField(4)" :on-previous="() => moveToPreviousField(5)" />
+                :on-next="() => moveToNextField(6)" :on-previous="() => moveToPreviousField(6)" />
 
               <FloatField ref="tiredFieldRef" v-model="formData.tired" label="Tired" :max="10" :required="true"
-                :on-next="() => moveToNextField(5)" :on-previous="() => moveToPreviousField(6)" />
+                :on-next="() => moveToNextField(7)" :on-previous="() => moveToPreviousField(7)" />
 
               <AutocompleteField ref="gameFieldRef" v-model="formData.game" label="Game" :suggestions="gameSuggestions"
-                :required="false" :on-next="() => moveToNextField(6)" :on-previous="() => moveToPreviousField(7)" />
+                :required="false" :on-next="() => moveToNextField(8)" :on-previous="() => moveToPreviousField(8)" />
 
               <AutocompleteField ref="musicFieldRef" v-model="formData.music" label="Music"
-                :suggestions="musicSuggestions" :required="true" :on-next="() => moveToNextField(7)"
-                :on-previous="() => moveToPreviousField(8)" />
+                :suggestions="musicSuggestions" :required="true" :on-next="() => moveToNextField(9)"
+                :on-previous="() => moveToPreviousField(9)" />
 
               <ListField ref="gratefulFieldRef" v-model="formData.grateful" label="Grateful" :required="true"
-                :on-next="() => moveToNextField(8)" :on-previous="() => moveToPreviousField(9)" />
+                :on-next="() => moveToNextField(10)" :on-previous="() => moveToPreviousField(10)" />
 
               <ListField ref="learnFieldRef" v-model="formData.learn" label="Learn" :required="true"
-                :on-next="() => moveToNextField(9)" :on-previous="() => moveToPreviousField(10)" />
+                :on-next="() => moveToNextField(11)" :on-previous="() => moveToPreviousField(11)" />
 
               <AutocompleteField ref="exerciseFieldRef" v-model="formData.exercise" label="Exercise"
-                :suggestions="exerciseSuggestions" :required="true" :on-next="() => moveToNextField(10)"
-                :on-previous="() => moveToPreviousField(11)" />
+                :suggestions="exerciseSuggestions" :required="true" :on-next="() => moveToNextField(12)"
+                :on-previous="() => moveToPreviousField(12)" />
 
               <FloatField ref="rememberFieldRef" v-model="formData.remember" label="Remember" :max="10" :required="true"
-                :on-next="() => moveToNextField(11)" :on-previous="() => moveToPreviousField(12)" />
+                :on-next="() => moveToNextField(13)" :on-previous="() => moveToPreviousField(13)" />
 
               <FloatField ref="dayRatingFieldRef" v-model="formData.dayRating" label="Day rating" :max="10"
-                :required="true" :on-next="() => moveToNextField(12)" :on-previous="() => moveToPreviousField(13)" />
+                :required="true" :on-next="() => moveToNextField(14)" :on-previous="() => moveToPreviousField(14)" />
 
               <IntField ref="feelingFieldRef" v-model="formData.feeling" label="Feeling" :max="100" :required="true"
-                :on-next="() => moveToNextField(13)" :on-previous="() => moveToPreviousField(14)" />
+                :on-next="() => moveToNextField(15)" :on-previous="() => moveToPreviousField(15)" />
 
               <StringField ref="whyFieldRef" v-model="formData.why" label="Why" :required="true"
-                :on-next="() => moveToNextField(14)" :on-previous="() => moveToPreviousField(15)" />
+                :on-next="() => moveToNextField(16)" :on-previous="() => moveToPreviousField(16)" />
 
               <AutocompleteListField ref="phaseFieldRef" v-model="formData.phase" label="Phase"
                 :suggestions="phaseSuggestions" :required="true" :auto-select="false"
-                :on-next="() => moveToNextField(15)" :on-previous="() => moveToPreviousField(16)" />
+                :on-next="() => moveToNextField(17)" :on-previous="() => moveToPreviousField(17)" />
 
               <PatternTextField ref="happenedFieldRef" v-model="formData.happened" label="Happened" :required="true"
-                :on-next="() => moveToNextField(16)" :on-previous="() => moveToPreviousField(17)" />
+                :on-next="() => moveToNextField(18)" :on-previous="() => moveToPreviousField(18)" />
               <VBtn size="small" variant="outlined" @click="happenedFieldRef?.capitalize()">
                 Capitalize
               </VBtn>
@@ -516,7 +580,7 @@ onMounted(async () => {
               <TimeDisplay ref="timeDisplayRef" v-model="formData.time" />
 
               <StringField ref="dayNameFieldRef" v-model="formData.dayName" label="Day name" :required="false"
-                :on-next="copyToClipboard" :on-previous="() => moveToPreviousField(17)" />
+                :on-next="copyToClipboard" :on-previous="() => moveToPreviousField(19)" />
 
               <VDivider class="my-4" />
 
@@ -614,6 +678,6 @@ onMounted(async () => {
 }
 
 .ga-6 {
-  gap: 2rem !important;
+  gap: 1.2rem !important;
 }
 </style>

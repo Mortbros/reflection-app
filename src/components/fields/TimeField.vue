@@ -46,11 +46,11 @@ const formatTime = () => {
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Enter' && !event.shiftKey) {
+  if ((event.key === 'Enter' && !event.shiftKey) || (event.key === 'Tab' && !event.shiftKey)) {
     event.preventDefault();
     formatTime();
     props.onNext?.();
-  } else if (event.key === 'Enter' && event.shiftKey) {
+  } else if (event.key === 'Tab' && event.shiftKey) {
     event.preventDefault();
     formatTime();
     props.onPrevious?.();

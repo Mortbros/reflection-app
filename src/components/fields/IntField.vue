@@ -41,10 +41,10 @@ const focus = async () => {
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Enter' && !event.shiftKey) {
+  if ((event.key === 'Enter' && !event.shiftKey) || (event.key === 'Tab' && !event.shiftKey)) {
     event.preventDefault();
     props.onNext?.();
-  } else if (event.key === 'Enter' && event.shiftKey) {
+  } else if (event.key === 'Tab' && event.shiftKey) {
     event.preventDefault();
     props.onPrevious?.();
   }

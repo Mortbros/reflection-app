@@ -56,10 +56,10 @@ const capitalize = () => {
 defineExpose({ focus, capitalize });
 
 const handleTextareaKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey) {
+  if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
     e.preventDefault();
     props.onNext?.();
-  } else if (e.key === 'Enter' && e.shiftKey) {
+  } else if (e.key === 'Tab' && e.shiftKey) {
     e.preventDefault();
     props.onPrevious?.();
   }
