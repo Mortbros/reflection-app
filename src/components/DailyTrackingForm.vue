@@ -480,6 +480,21 @@ onMounted(async () => {
   await nextTick();
   batheFieldRef.value?.focus();
 });
+
+function openYoutubeHistory() {
+  window.open("https://www.youtube.com/feed/history", "_blank")?.focus();
+}
+
+document.addEventListener('keydown', function (event) {
+  const isControlPressed = event.ctrlKey || event.metaKey;
+
+  if (isControlPressed) {
+    event.preventDefault();
+    if (event.key === 'y') {
+      openYoutubeHistory();
+    }
+  }
+});
 </script>
 
 <template>
@@ -614,6 +629,7 @@ onMounted(async () => {
                   Clear
                 </VBtn>
               </div>
+              <div class="d-flex justify-center" style="color: gray;">Ctrl+y opens youtube history</div>
             </div>
           </VCardText>
         </VCard>
