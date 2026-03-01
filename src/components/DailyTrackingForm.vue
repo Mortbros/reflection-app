@@ -544,7 +544,7 @@ document.addEventListener('keydown', function (event) {
               <FloatField ref="napFieldRef" v-model="formData.nap" label="Nap" :max="10" :required="false"
                 :on-next="() => moveToNextField(4)" :on-previous="() => moveToPreviousField(4)" />
 
-              <FloatField ref="workedFieldRef" v-model="formData.nap" label="Worked" :max="24" :required="false"
+              <FloatField ref="workedFieldRef" v-model="formData.worked" label="Worked" :max="24" :required="false"
                 :on-next="() => moveToNextField(5)" :on-previous="() => moveToPreviousField(5)" />
 
               <FloatField ref="stressFieldRef" v-model="formData.stress" label="Stress" :max="10" :required="true"
