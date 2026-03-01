@@ -488,11 +488,9 @@ function openYoutubeHistory() {
 document.addEventListener('keydown', function (event) {
   const isControlPressed = event.ctrlKey || event.metaKey;
 
-  if (isControlPressed) {
+  if (isControlPressed && event.key === 'y') {
     event.preventDefault();
-    if (event.key === 'y') {
-      openYoutubeHistory();
-    }
+    openYoutubeHistory();
   }
 });
 </script>
@@ -563,7 +561,7 @@ document.addEventListener('keydown', function (event) {
               <ListField ref="gratefulFieldRef" v-model="formData.grateful" label="Grateful" :required="true"
                 :on-next="() => moveToNextField(10)" :on-previous="() => moveToPreviousField(10)" />
 
-              <ListField ref="learnFieldRef" v-model="formData.learn" label="Learn" :required="true"
+              <ListField ref="learnFieldRef" v-model="formData.learn" label="Learn (Ctrl + y)" :required="true"
                 :on-next="() => moveToNextField(11)" :on-previous="() => moveToPreviousField(11)" />
 
               <AutocompleteField ref="exerciseFieldRef" v-model="formData.exercise" label="Exercise"
