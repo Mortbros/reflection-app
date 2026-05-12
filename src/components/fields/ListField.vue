@@ -139,7 +139,7 @@ const handleBlur = (index: number) => {
 
 <template>
   <div class="list-field">
-    <div v-for="(item, index) in localItems" :key="index" class="mb-2">
+    <div v-for="(item, index) in localItems" :key="index">
       <VTextField :ref="(el) => { if (el) inputRefs[index] = el as InstanceType<typeof VTextField> }"
         :model-value="localItems[index]" :label="index === 0 ? label : ''" variant="outlined" density="comfortable"
         class="text-h6" hide-details spellcheck="true" @update:model-value="updateItem(index, $event)"

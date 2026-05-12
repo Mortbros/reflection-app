@@ -526,30 +526,38 @@ document.addEventListener('keydown', function (event) {
               <YesNoField ref="batheFieldRef" v-model="formData.bathe" label="Bathe" :required="true"
                 :on-next="() => moveToNextField(1)" :on-previous="() => moveToPreviousField(1)" />
 
-              <VRow>
-                <VCol>
+              <VRow class="py-0">
+                <VCol class="pt-1 pb-0">
                   <TimeField ref="wakeFieldRef" v-model="formData.wake" label="Wake" :required="true"
                     :on-next="() => moveToNextField(2)" :on-previous="() => moveToPreviousField(2)" />
-
                 </VCol>
-                <VCol>
+                <VCol class="pt-1 pb-0">
                   <TimeField ref="sleepFieldRef" v-model="formData.sleep" label="Sleep" :default-to-future="true"
                     :future-minutes="20" :required="true" :on-next="() => moveToNextField(3)"
                     :on-previous="() => moveToPreviousField(3)" />
                 </VCol>
               </VRow>
+              <VRow class="py-0">
+                <VCol class="pt-0 pb-2">
+                  <FloatField ref="napFieldRef" v-model="formData.nap" label="Nap" :max="10" :required="false"
+                    :on-next="() => moveToNextField(4)" :on-previous="() => moveToPreviousField(4)" />
+                </VCol>
+                <VCol class="pt-0 pb-2">
+                  <FloatField ref="workedFieldRef" v-model="formData.worked" label="Worked" :max="24" :required="false"
+                    :on-next="() => moveToNextField(5)" :on-previous="() => moveToPreviousField(5)" />
+                </VCol>
+              </VRow>
 
-              <FloatField ref="napFieldRef" v-model="formData.nap" label="Nap" :max="10" :required="false"
-                :on-next="() => moveToNextField(4)" :on-previous="() => moveToPreviousField(4)" />
-
-              <FloatField ref="workedFieldRef" v-model="formData.worked" label="Worked" :max="24" :required="false"
-                :on-next="() => moveToNextField(5)" :on-previous="() => moveToPreviousField(5)" />
-
-              <FloatField ref="stressFieldRef" v-model="formData.stress" label="Stress" :max="10" :required="true"
-                :on-next="() => moveToNextField(6)" :on-previous="() => moveToPreviousField(6)" />
-
-              <FloatField ref="tiredFieldRef" v-model="formData.tired" label="Tired" :max="10" :required="true"
-                :on-next="() => moveToNextField(7)" :on-previous="() => moveToPreviousField(7)" />
+              <VRow class="py-0">
+                <VCol class="pt-0 pb-2">
+                  <FloatField ref="stressFieldRef" v-model="formData.stress" label="Stress" :max="10" :required="true"
+                    :on-next="() => moveToNextField(6)" :on-previous="() => moveToPreviousField(6)" />
+                </VCol>
+                <VCol class="pt-0 pb-2">
+                  <FloatField ref="tiredFieldRef" v-model="formData.tired" label="Tired" :max="10" :required="true"
+                    :on-next="() => moveToNextField(7)" :on-previous="() => moveToPreviousField(7)" />
+                </VCol>
+              </VRow>
 
               <AutocompleteField ref="gameFieldRef" v-model="formData.game" label="Game" :suggestions="gameSuggestions"
                 :required="false" :on-next="() => moveToNextField(8)" :on-previous="() => moveToPreviousField(8)" />
