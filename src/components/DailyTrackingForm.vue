@@ -533,7 +533,7 @@ document.addEventListener('keydown', function (event) {
                 </VCol>
                 <VCol class="pt-1 pb-0">
                   <TimeField ref="sleepFieldRef" v-model="formData.sleep" label="Sleep" :default-to-future="true"
-                    :future-minutes="20" :required="true" :on-next="() => moveToNextField(3)"
+                    :future-minutes="25" :required="true" :on-next="() => moveToNextField(3)"
                     :on-previous="() => moveToPreviousField(3)" />
                 </VCol>
               </VRow>

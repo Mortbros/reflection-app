@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, nextTick } from 'vue';
 import { VTextField } from 'vuetify/components';
 import { focusInput } from '@/lib/fieldUtils';
 
@@ -62,9 +62,19 @@ defineExpose({ focus });
 onMounted(() => {
   if (!props.modelValue && props.defaultToFuture) {
     const now = new Date();
+
     const future = new Date(now.getTime() + (props.futureMinutes || 20) * 60000);
+    const msIn10Mins = 10 * 60 * 1000;
+    const roundedTime = Math.round(future.getTime() / msIn10Mins) * msIn10Mins;
+    future.setTime(roundedTime);
+
     const hours = String(future.getHours()).padStart(2, '0');
     const minutes = String(future.getMinutes()).padStart(2, '0');
+
+    // TODO: figure out why this doesnt work when the console log is not here.
+    console.log();
+
+    value.value = `${hours}:${minutes}`;
     emit('update:modelValue', `${hours}:${minutes}`);
   }
 });
