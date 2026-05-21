@@ -71,9 +71,8 @@ onMounted(() => {
     const hours = String(future.getHours()).padStart(2, '0');
     const minutes = String(future.getMinutes()).padStart(2, '0');
 
-    // TODO: figure out why this doesnt work when the console log is not here.
-    console.log();
-
+    // TODO: figure out why this doesn't work if only one set exists
+    value.value = `${hours}:${minutes}`;
     value.value = `${hours}:${minutes}`;
     emit('update:modelValue', `${hours}:${minutes}`);
   }
