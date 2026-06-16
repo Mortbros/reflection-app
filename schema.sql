@@ -1,0 +1,24 @@
+CREATE TABLE IF NOT EXISTS mapping_type (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS list_value (
+  id INTEGER PRIMARY KEY,
+  abbreviation TEXT NOT NULL,
+  value TEXT NOT NULL,
+  type_id TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mapping_instance (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  expansion TEXT NOT NULL,
+  implicit_add_base INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS shortcut_group (
+  id INTEGER PRIMARY KEY,
+  shortcode TEXT NOT NULL UNIQUE,
+  expansion TEXT NOT NULL
+);

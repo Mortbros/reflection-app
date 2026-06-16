@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch, useTemplateRef } from 'vue';
-import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip, VIcon, VForm } from 'vuetify/components';
+import { ref, onMounted, onUnmounted, nextTick, watch, useTemplateRef } from 'vue';
+import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip, VIcon } from 'vuetify/components';
 import DateField from '@/components/fields/DateField.vue';
 import YesNoField from '@/components/fields/YesNoField.vue';
 import TimeField from '@/components/fields/TimeField.vue';
 import FloatField from '@/components/fields/FloatField.vue';
 import IntField from '@/components/fields/IntField.vue';
-
-
 import StringField from '@/components/fields/StringField.vue';
 import ListField from '@/components/fields/ListField.vue';
 import PatternTextField from '@/components/fields/PatternTextField.vue';
@@ -19,8 +17,22 @@ import { musicSuggestions } from '@/assets/musicSuggestions';
 import { phaseSuggestions } from '@/assets/phaseSuggestions';
 import { gameSuggestions } from '@/assets/gameSuggestions';
 import { getTodayDate, getYesterdayDate } from '@/lib/fieldUtils';
+import { getDb, getMappingInstances, getListValues } from '@/lib/db';
+import type { MappingInstance, ListValue } from '@/lib/db';
 
 const STORAGE_KEY = 'daily_tracking_form_data';
+
+// DB state
+const dbMappings = ref<MappingInstance[]>([]);
+const dbListValues = ref<ListValue[]>([]);
+const dbLoaded = ref(false);
+
+const loadDb = async () => {
+  const db = await getDb();
+  dbMappings.value = getMappingInstances(db);
+  dbListValues.value = getListValues(db);
+  dbLoaded.value = true;
+};
 
 // Form data
 const formData = ref({
@@ -47,22 +59,14 @@ const formData = ref({
   dayName: ''
 });
 
-// Load from localStorage
 const loadFormData = () => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      // Ensure arrays are properly initialized
-      if (!parsed.grateful || !Array.isArray(parsed.grateful)) {
-        parsed.grateful = [];
-      }
-      if (!parsed.learn || !Array.isArray(parsed.learn)) {
-        parsed.learn = [];
-      }
-      if (!parsed.phase || !Array.isArray(parsed.phase)) {
-        parsed.phase = [];
-      }
+      if (!Array.isArray(parsed.grateful)) parsed.grateful = [];
+      if (!Array.isArray(parsed.learn)) parsed.learn = [];
+      if (!Array.isArray(parsed.phase)) parsed.phase = [];
       Object.assign(formData.value, parsed);
     }
   } catch (err) {
@@ -70,7 +74,6 @@ const loadFormData = () => {
   }
 };
 
-// Save to localStorage
 const saveFormData = () => {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(formData.value));
@@ -79,42 +82,24 @@ const saveFormData = () => {
   }
 };
 
-// Watch form data and save on changes
-watch(formData, () => {
-  saveFormData();
-}, { deep: true });
+watch(formData, saveFormData, { deep: true });
+watch(() => formData.value.grateful, saveFormData, { deep: true });
+watch(() => formData.value.learn, saveFormData, { deep: true });
+watch(() => formData.value.phase, saveFormData, { deep: true });
 
-// Watch grateful array specifically to ensure it saves
-watch(() => formData.value.grateful, () => {
-  saveFormData();
-}, { deep: true, immediate: false });
-
-// Also watch learn and phase arrays
-watch(() => formData.value.learn, () => {
-  saveFormData();
-}, { deep: true, immediate: false });
-
-watch(() => formData.value.phase, () => {
-  saveFormData();
-}, { deep: true, immediate: false });
-
-// Watch time field and set date to yesterday if time is between 00:00 and 12:00
 watch(() => formData.value.time, (newTime) => {
   if (newTime) {
-    const timeMatch = newTime.match(/(\d{1,2}):?(\d{2})?/);
-    if (timeMatch) {
-      const hours = parseInt(timeMatch[1] || '0', 10);
+    const m = newTime.match(/(\d{1,2}):?(\d{2})?/);
+    if (m) {
+      const hours = parseInt(m[1] || '0', 10);
       if (hours >= 0 && hours < 12) {
-        // Time is between 00:00 and 11:59, set date to yesterday
         formData.value.date = getYesterdayDate();
       }
     }
   }
 });
 
-const setDateToToday = () => {
-  formData.value.date = getTodayDate();
-};
+const setDateToToday = () => { formData.value.date = getTodayDate(); };
 
 const clearForm = () => {
   formData.value = {
@@ -142,231 +127,158 @@ const clearForm = () => {
   };
   setDateToToday();
   localStorage.removeItem(STORAGE_KEY);
-  // Focus on bathe after clearing
-  nextTick(() => {
-    batheFieldRef.value?.focus();
-  });
+  nextTick(() => formRefs.bathe.value?.focus());
 };
 
-// Field refs for focus management
-const dateFieldRef = ref<InstanceType<typeof DateField> | null>(null);
-const batheFieldRef = ref<InstanceType<typeof YesNoField> | null>(null);
-const wakeFieldRef = ref<InstanceType<typeof TimeField> | null>(null);
-const sleepFieldRef = ref<InstanceType<typeof TimeField> | null>(null);
-const napFieldRef = ref<InstanceType<typeof FloatField> | null>(null);
-const workedFieldRef = ref<InstanceType<typeof FloatField> | null>(null);
-const stressFieldRef = ref<InstanceType<typeof FloatField> | null>(null);
-const tiredFieldRef = ref<InstanceType<typeof FloatField> | null>(null);
-const gameFieldRef = ref<InstanceType<typeof AutocompleteField> | null>(null);
-const musicFieldRef = ref<InstanceType<typeof AutocompleteField> | null>(null);
-const exerciseFieldRef = ref<InstanceType<typeof AutocompleteField> | null>(null);
-const gratefulFieldRef = ref<InstanceType<typeof ListField> | null>(null);
-const learnFieldRef = ref<InstanceType<typeof ListField> | null>(null);
-const rememberFieldRef = ref<InstanceType<typeof FloatField> | null>(null);
-const dayRatingFieldRef = ref<InstanceType<typeof FloatField> | null>(null);
-const feelingFieldRef = ref<InstanceType<typeof IntField> | null>(null);
-const whyFieldRef = ref<InstanceType<typeof StringField> | null>(null);
-const phaseFieldRef = ref<InstanceType<typeof AutocompleteListField> | null>(null);
-const happenedFieldRef = ref<InstanceType<typeof PatternTextField> | null>(null);
-const timeDisplayRef = ref<InstanceType<typeof TimeDisplay> | null>(null);
-const dayNameFieldRef = ref<InstanceType<typeof StringField> | null>(null);
+// ── Field refs ───────────────────────────────────────────────────────────────
 
-const errorToFieldRef: Record<string, () => void> = {
-  'Date': () => dateFieldRef.value?.focus(),
-  'Bathe': () => batheFieldRef.value?.focus(),
-  'Wake': () => wakeFieldRef.value?.focus(),
-  'Sleep': () => sleepFieldRef.value?.focus(),
-  'Stress': () => stressFieldRef.value?.focus(),
-  'Tired': () => tiredFieldRef.value?.focus(),
-  'Music': () => musicFieldRef.value?.focus(),
-  'Grateful': () => gratefulFieldRef.value?.focus(),
-  'Learn': () => learnFieldRef.value?.focus(),
-  'Exercise': () => exerciseFieldRef.value?.focus(),
-  'Remember': () => rememberFieldRef.value?.focus(),
-  'Day rating': () => dayRatingFieldRef.value?.focus(),
-  'Feeling': () => feelingFieldRef.value?.focus(),
-  'Why': () => whyFieldRef.value?.focus(),
-  'Phase': () => phaseFieldRef.value?.focus(),
-  'Happened': () => happenedFieldRef.value?.focus()
+const formRefs = {
+  bathe:     useTemplateRef<InstanceType<typeof YesNoField>>('batheRef'),
+  wake:      useTemplateRef<InstanceType<typeof TimeField>>('wakeRef'),
+  sleep:     useTemplateRef<InstanceType<typeof TimeField>>('sleepRef'),
+  nap:       useTemplateRef<InstanceType<typeof FloatField>>('napRef'),
+  worked:    useTemplateRef<InstanceType<typeof FloatField>>('workedRef'),
+  stress:    useTemplateRef<InstanceType<typeof FloatField>>('stressRef'),
+  tired:     useTemplateRef<InstanceType<typeof FloatField>>('tiredRef'),
+  game:      useTemplateRef<InstanceType<typeof AutocompleteField>>('gameRef'),
+  music:     useTemplateRef<InstanceType<typeof AutocompleteField>>('musicRef'),
+  grateful:  useTemplateRef<InstanceType<typeof ListField>>('gratefulRef'),
+  learn:     useTemplateRef<InstanceType<typeof ListField>>('learnRef'),
+  exercise:  useTemplateRef<InstanceType<typeof AutocompleteField>>('exerciseRef'),
+  remember:  useTemplateRef<InstanceType<typeof FloatField>>('rememberRef'),
+  dayRating: useTemplateRef<InstanceType<typeof FloatField>>('dayRatingRef'),
+  feeling:   useTemplateRef<InstanceType<typeof IntField>>('feelingRef'),
+  why:       useTemplateRef<InstanceType<typeof StringField>>('whyRef'),
+  phase:     useTemplateRef<InstanceType<typeof AutocompleteListField>>('phaseRef'),
+  happened:  useTemplateRef<InstanceType<typeof PatternTextField>>('happenedRef'),
+  dayName:   useTemplateRef<InstanceType<typeof StringField>>('dayNameRef'),
 };
 
-const focusFieldByError = (errorLabel: string) => {
-  const focusFn = errorToFieldRef[errorLabel];
-  if (focusFn) {
-    focusFn();
+type FieldName = keyof typeof formRefs | 'submit';
+
+const fieldOrder: (keyof typeof formRefs)[] = [
+  'bathe', 'wake', 'sleep', 'nap', 'worked', 'stress', 'tired',
+  'game', 'music', 'grateful', 'learn', 'exercise',
+  'remember', 'dayRating', 'feeling', 'why', 'phase', 'happened', 'dayName',
+];
+
+async function focusRef(ref: FieldName) {
+  if (ref === 'submit') {
+    copyToClipboard();
+    return;
   }
+  await nextTick();
+  formRefs[ref].value?.focus();
+  await nextTick();
+  document.activeElement?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+const focusRules: Record<keyof typeof formRefs, () => void> = {
+  bathe:     () => focusRef('wake'),
+  wake:      () => focusRef('sleep'),
+  sleep:     () => focusRef('nap'),
+  nap:       () => focusRef('worked'),
+  worked:    () => focusRef('stress'),
+  stress:    () => focusRef('tired'),
+  tired:     () => focusRef('game'),
+  game:      () => focusRef('music'),
+  music:     () => focusRef('grateful'),
+  grateful:  () => focusRef('learn'),
+  learn:     () => focusRef('exercise'),
+  exercise:  () => focusRef('remember'),
+  remember:  () => focusRef('dayRating'),
+  dayRating: () => focusRef('feeling'),
+  feeling:   () => focusRef('why'),
+  why:       () => focusRef('phase'),
+  phase:     () => focusRef('happened'),
+  happened:  () => focusRef('dayName'),
+  dayName:   () => focusRef('submit'),
 };
+
+const prevRules: Record<keyof typeof formRefs, () => void> = Object.fromEntries(
+  fieldOrder.map((name, i) => [
+    name,
+    () => focusRef(i === 0 ? fieldOrder[0] : fieldOrder[i - 1]),
+  ])
+) as Record<keyof typeof formRefs, () => void>;
+
+// ── Error → field focus map ──────────────────────────────────────────────────
+
+const errorToField: Record<string, keyof typeof formRefs> = {
+  'Date':       'bathe',   // date has no entry in formRefs, focus first real field
+  'Bathe':      'bathe',
+  'Wake':       'wake',
+  'Sleep':      'sleep',
+  'Stress':     'stress',
+  'Tired':      'tired',
+  'Music':      'music',
+  'Grateful':   'grateful',
+  'Learn':      'learn',
+  'Exercise':   'exercise',
+  'Remember':   'remember',
+  'Day rating': 'dayRating',
+  'Feeling':    'feeling',
+  'Why':        'why',
+  'Phase':      'phase',
+  'Happened':   'happened',
+};
+
+const dateFieldRef = useTemplateRef<InstanceType<typeof DateField>>('dateRef');
+
+const focusFieldByError = (label: string) => {
+  if (label === 'Date') { dateFieldRef.value?.focus(); return; }
+  const field = errorToField[label];
+  if (field) focusRef(field);
+};
+
+// ── Validation ───────────────────────────────────────────────────────────────
 
 const validationErrors = ref<string[]>([]);
 
 const validateForm = () => {
-  const errors: string[] = [];
-
-  if (!formData.value.date) errors.push('Date');
-  if (!formData.value.bathe) errors.push('Bathe');
-  if (!formData.value.wake) errors.push('Wake');
-  if (!formData.value.sleep) errors.push('Sleep');
-  if (formData.value.stress < 1) errors.push('Stress');
-  if (formData.value.tired < 1) errors.push('Tired');
-  // Game is not required
-  if (!formData.value.music) errors.push('Music');
-  if (!formData.value.grateful || !Array.isArray(formData.value.grateful) || formData.value.grateful.length === 0) errors.push('Grateful');
-  if (!formData.value.learn || !Array.isArray(formData.value.learn) || formData.value.learn.length === 0) errors.push('Learn');
-  if (!formData.value.exercise) errors.push('Exercise');
-  if (formData.value.remember < 1) errors.push('Remember');
-  if (formData.value.dayRating < 1) errors.push('Day rating');
-  if (formData.value.feeling < 1) errors.push('Feeling');
-  if (!formData.value.why) errors.push('Why');
-  if (!formData.value.phase || !Array.isArray(formData.value.phase) || formData.value.phase.length === 0) errors.push('Phase');
-  if (!formData.value.happened) errors.push('Happened');
-
-  validationErrors.value = errors;
+  const e: string[] = [];
+  if (!formData.value.date) e.push('Date');
+  if (!formData.value.bathe) e.push('Bathe');
+  if (!formData.value.wake) e.push('Wake');
+  if (!formData.value.sleep) e.push('Sleep');
+  if (formData.value.stress < 1) e.push('Stress');
+  if (formData.value.tired < 1) e.push('Tired');
+  if (!formData.value.music) e.push('Music');
+  if (!formData.value.grateful?.length) e.push('Grateful');
+  if (!formData.value.learn?.length) e.push('Learn');
+  if (!formData.value.exercise) e.push('Exercise');
+  if (formData.value.remember < 1) e.push('Remember');
+  if (formData.value.dayRating < 1) e.push('Day rating');
+  if (formData.value.feeling < 1) e.push('Feeling');
+  if (!formData.value.why) e.push('Why');
+  if (!formData.value.phase?.length) e.push('Phase');
+  if (!formData.value.happened) e.push('Happened');
+  validationErrors.value = e;
 };
 
-// Watch form data for validation
-watch(formData, () => {
-  validateForm();
-}, { deep: true, immediate: true });
+watch(formData, validateForm, { deep: true, immediate: true });
 
-// const formRef = useTemplateRef<VForm>('formRef');
+// ── Clipboard ────────────────────────────────────────────────────────────────
 
-// const formRefs = {
-//   "date": useTemplateRef<typeof DateField>('dateRef'),
-//   "bathe": useTemplateRef<typeof YesNoField>('batheRef'),
-//   "wake": useTemplateRef<typeof TimeField>('wakeRef'),
-//   "sleep": useTemplateRef<typeof TimeField>('sleepRef'),
-//   "nap": useTemplateRef<typeof FloatField>('napRef'),
-//   "worked": useTemplateRef<typeof FloatField>('workedRef'),
-//   "stress": useTemplateRef<typeof FloatField>('stressRef'),
-//   "tired": useTemplateRef<typeof FloatField>('tiredRef'),
-//   "game": useTemplateRef<typeof AutocompleteField>('gameRef'),
-//   "music": useTemplateRef<typeof AutocompleteField>('musicRef'),
-//   "grateful": useTemplateRef<typeof AutocompleteField>('gratefulRef'),
-//   "learn": useTemplateRef<typeof ListField>('learnRef'),
-//   "exercise": useTemplateRef<typeof ListField>('exerciseRef'),
-//   "remember": useTemplateRef<typeof FloatField>('rememberRef'),
-//   "dayRating": useTemplateRef<typeof FloatField>('dayRatingRef'),
-//   "feeling": useTemplateRef<typeof IntField>('feelingRef'),
-//   "why": useTemplateRef<typeof StringField>('whyRef'),
-//   "phase": useTemplateRef<typeof AutocompleteListField>('phaseRef'),
-//   "happened": useTemplateRef<typeof PatternTextField>('happenedRef'),
-//   "time": useTemplateRef<typeof TimeDisplay>('timeRef'),
-//   "dayName": useTemplateRef<typeof StringField>('dayNameRef'),
-// }
-
-// async function focusRef(ref: keyof typeof formRefs) {
-//   nextTick(() => formRefs[ref].value?.focus());
-// }
-
-// const focusRules = {
-//   "date": () => { focusRef(''); },
-//   "bathe": () => { focusRef('bathe'); },
-//   "wake": () => { focusRef('wake'); },
-//   "sleep": () => { focusRef('sleep'); },
-//   "nap": () => { focusRef('nap'); },
-//   "worked": () => { focusRef('worked'); },
-//   "stress": () => { focusRef('stress'); },
-//   "tired": () => { focusRef('tired'); },
-//   "game": () => { focusRef('game'); },
-//   "music": () => { focusRef('music'); },
-//   "grateful": () => { focusRef('grateful'); },
-//   "learn": () => { focusRef('learn'); },
-//   "exercise": () => { focusRef('exercise'); },
-//   "remember": () => { focusRef('remember'); },
-//   "dayRating": () => { focusRef('dayRating'); },
-//   "feeling": () => { focusRef('feeling'); },
-//   "why": () => { focusRef('why'); },
-//   "phase": () => { focusRef('phase'); },
-//   "happened": () => { focusRef('happened'); },
-//   "time": () => { focusRef('time'); },
-//   "dayName": () => { focusRef('dayName'); },
-// }
-// Focus order array
-const focusOrder = [
-  () => batheFieldRef.value?.focus(),
-  () => wakeFieldRef.value?.focus(),
-  () => sleepFieldRef.value?.focus(),
-  () => napFieldRef.value?.focus(),
-  () => workedFieldRef.value?.focus(),
-  () => stressFieldRef.value?.focus(),
-  () => tiredFieldRef.value?.focus(),
-  () => gameFieldRef.value?.focus(),
-  () => musicFieldRef.value?.focus(),
-  () => gratefulFieldRef.value?.focus(),
-  () => learnFieldRef.value?.focus(),
-  () => exerciseFieldRef.value?.focus(),
-  () => rememberFieldRef.value?.focus(),
-  () => dayRatingFieldRef.value?.focus(),
-  () => feelingFieldRef.value?.focus(),
-  () => whyFieldRef.value?.focus(),
-  () => phaseFieldRef.value?.focus(),
-  () => happenedFieldRef.value?.focus(),
-  () => dayNameFieldRef.value?.focus()
-];
-
-const scrollToActiveElement = async () => {
-  await nextTick();
-  const activeElement = document.activeElement;
-  if (activeElement) {
-    activeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-};
-
-const moveToNextField = async (currentIndex: number) => {
-  if (currentIndex < focusOrder.length) {
-    await nextTick();
-    const focusFn = focusOrder[currentIndex];
-    if (focusFn) {
-      focusFn();
-      await scrollToActiveElement();
-    }
-  } else {
-    // If we reach the end of the form, copy to clipboard
-    copyToClipboard();
-  }
-};
-
-const moveToPreviousField = async (currentIndex: number) => {
-  const prevIndex = currentIndex - 2 >= 0 ? currentIndex - 2 : 0;
-  await nextTick();
-  const focusFn = focusOrder[prevIndex];
-  if (focusFn) {
-    focusFn();
-    await scrollToActiveElement();
-  }
-};
-
-// Copy to clipboard
 const copySuccess = ref(false);
 const sleepTimeMessage = ref('');
+
 const copyToClipboard = async () => {
-  // Check if sleep time is in the past and update it
   let sleepTime = formData.value.sleep;
   if (sleepTime) {
-    const timeMatch = sleepTime.match(/(\d{1,2}):?(\d{2})?/);
-    if (timeMatch) {
-      const hours = parseInt(timeMatch[1] || '0', 10);
-      const minutes = parseInt(timeMatch[2] || '0', 10);
-
+    const m = sleepTime.match(/(\d{1,2}):?(\d{2})?/);
+    if (m) {
+      const hours = parseInt(m[1] || '0', 10);
+      const minutes = parseInt(m[2] || '0', 10);
       const now = new Date();
-      const sleepDate = new Date();
-      sleepDate.setHours(hours, minutes, 0, 0);
-
-      // Compare times on the same day - if sleep time has passed today, update it
-      const nowTime = now.getHours() * 60 + now.getMinutes();
-      const sleepTimeMinutes = hours * 60 + minutes;
-
-      // If sleep time is in the past (earlier today), set it to 10 minutes from now
-      if (sleepTimeMinutes < nowTime) {
-        const futureTime = new Date(now.getTime() + 10 * 60000); // 10 minutes from now
-        const futureHours = String(futureTime.getHours()).padStart(2, '0');
-        const futureMinutes = String(futureTime.getMinutes()).padStart(2, '0');
-        sleepTime = `${futureHours}:${futureMinutes}`;
+      const nowMins = now.getHours() * 60 + now.getMinutes();
+      const sleepMins = hours * 60 + minutes;
+      if (sleepMins < nowMins) {
+        const future = new Date(now.getTime() + 10 * 60000);
+        sleepTime = `${String(future.getHours()).padStart(2, '0')}:${String(future.getMinutes()).padStart(2, '0')}`;
         formData.value.sleep = sleepTime;
         sleepTimeMessage.value = 'Sleep time updated to 10 minutes from now';
-        setTimeout(() => {
-          sleepTimeMessage.value = '';
-        }, 3000);
+        setTimeout(() => { sleepTimeMessage.value = ''; }, 3000);
       }
     }
   }
@@ -392,80 +304,34 @@ const copyToClipboard = async () => {
     formData.value.phase.join(', '),
     formData.value.time,
     formData.value.happened,
-    formData.value.dayName
+    formData.value.dayName,
   ];
 
-  const tabSeparated = values.join('\t');
+  const text = values.join('\t');
 
   try {
-    // Try modern clipboard API first
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(tabSeparated);
-      copySuccess.value = true;
-      setTimeout(() => {
-        copySuccess.value = false;
-      }, 2000);
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
     } else {
-      // Fallback for mobile devices and older browsers
-      const textarea = document.createElement('textarea');
-      textarea.value = tabSeparated;
-      textarea.style.position = 'fixed';
-      textarea.style.left = '-999999px';
-      textarea.style.top = '-999999px';
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
-
-      try {
-        const successful = document.execCommand('copy');
-        if (successful) {
-          copySuccess.value = true;
-          setTimeout(() => {
-            copySuccess.value = false;
-          }, 2000);
-        } else {
-          throw new Error('Copy command failed');
-        }
-      } catch (err) {
-        console.error('Failed to copy text: ', err);
-      } finally {
-        document.body.removeChild(textarea);
-      }
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      Object.assign(ta.style, { position: 'fixed', left: '-999999px', top: '-999999px' });
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
     }
+    copySuccess.value = true;
+    setTimeout(() => { copySuccess.value = false; }, 2000);
   } catch (err) {
-    // Fallback for mobile devices
-    const textarea = document.createElement('textarea');
-    textarea.value = tabSeparated;
-    textarea.style.position = 'fixed';
-    textarea.style.left = '-999999px';
-    textarea.style.top = '-999999px';
-    document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-
-    try {
-      const successful = document.execCommand('copy');
-      if (successful) {
-        copySuccess.value = true;
-        setTimeout(() => {
-          copySuccess.value = false;
-        }, 2000);
-      } else {
-        console.error('Failed to copy text: Copy command failed');
-      }
-    } catch (fallbackErr) {
-      console.error('Failed to copy text: ', fallbackErr);
-    } finally {
-      document.body.removeChild(textarea);
-    }
+    console.error('Failed to copy:', err);
   }
 };
 
-const clearButtonRef = ref<InstanceType<typeof VBtn> | null>(null);
+// ── Clear button keyboard ─────────────────────────────────────────────────────
 
-const focusClearButton = () => {
-  clearButtonRef.value?.$el.focus();
-};
+const clearButtonRef = ref<InstanceType<typeof VBtn> | null>(null);
 
 const handleClearButtonKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Enter' || (event.key === 'Tab' && !event.shiftKey)) {
@@ -474,24 +340,18 @@ const handleClearButtonKeydown = (event: KeyboardEvent) => {
   }
 };
 
-// Focus on bathe field on mount
+// Ctrl+S is dispatched as a custom event from App.vue (single listener, no stacking)
+const onAppCopy = () => copyToClipboard();
+onMounted(() => document.addEventListener('app:copy', onAppCopy));
+onUnmounted(() => document.removeEventListener('app:copy', onAppCopy));
+
+// ── Mount ────────────────────────────────────────────────────────────────────
+
 onMounted(async () => {
   loadFormData();
+  await loadDb();
   await nextTick();
-  batheFieldRef.value?.focus();
-});
-
-function openYoutubeHistory() {
-  window.open("https://www.youtube.com/feed/history", "_blank")?.focus();
-}
-
-document.addEventListener('keydown', function (event) {
-  const isControlPressed = event.ctrlKey || event.metaKey;
-
-  if (isControlPressed && event.key === 'y') {
-    event.preventDefault();
-    openYoutubeHistory();
-  }
+  formRefs.bathe.value?.focus();
 });
 </script>
 
@@ -503,8 +363,8 @@ document.addEventListener('keydown', function (event) {
           <VCardText>
             <div class="d-flex flex-column ga-6">
               <div class="d-flex justify-center flex-wrap ga-4 mb-4">
-                <VBtn :color="copySuccess ? 'success' : 'primary'" size="large" class="text-h6" @click="copyToClipboard"
-                  :prepend-icon="copySuccess ? 'mdi-check' : 'mdi-content-copy'">
+                <VBtn :color="copySuccess ? 'success' : 'primary'" size="large" class="text-h6"
+                  @click="copyToClipboard" :prepend-icon="copySuccess ? 'mdi-check' : 'mdi-content-copy'">
                   {{ copySuccess ? 'Copied!' : 'Copy to Clipboard' }}
                 </VBtn>
                 <VBtn ref="clearButtonRef" color="error" size="large" class="text-h6" prepend-icon="mdi-delete"
@@ -515,108 +375,104 @@ document.addEventListener('keydown', function (event) {
 
               <div class="d-flex align-center ga-2">
                 <div class="flex-grow-1">
-                  <DateField ref="dateFieldRef" v-model="formData.date" label="Date" :required="true"
-                    :on-next="() => moveToNextField(0)" />
+                  <DateField ref="dateRef" v-model="formData.date" label="Date" :required="true"
+                    :on-next="() => focusRef('bathe')" />
                 </div>
-                <VBtn size="small" variant="outlined" @click="setDateToToday">
-                  Today
-                </VBtn>
+                <VBtn size="small" variant="outlined" @click="setDateToToday">Today</VBtn>
               </div>
 
-              <YesNoField ref="batheFieldRef" v-model="formData.bathe" label="Bathe" :required="true"
-                :on-next="() => moveToNextField(1)" :on-previous="() => moveToPreviousField(1)" />
+              <YesNoField ref="batheRef" v-model="formData.bathe" label="Bathe" :required="true"
+                :on-next="focusRules['bathe']" :on-previous="prevRules['bathe']" />
 
               <VRow class="py-0">
                 <VCol class="pt-1 pb-0">
-                  <TimeField ref="wakeFieldRef" v-model="formData.wake" label="Wake" :required="true"
-                    :on-next="() => moveToNextField(2)" :on-previous="() => moveToPreviousField(2)" />
+                  <TimeField ref="wakeRef" v-model="formData.wake" label="Wake" :required="true"
+                    :on-next="focusRules['wake']" :on-previous="prevRules['wake']" />
                 </VCol>
                 <VCol class="pt-1 pb-0">
-                  <TimeField ref="sleepFieldRef" v-model="formData.sleep" label="Sleep" :default-to-future="true"
-                    :future-minutes="25" :required="true" :on-next="() => moveToNextField(3)"
-                    :on-previous="() => moveToPreviousField(3)" />
-                </VCol>
-              </VRow>
-              <VRow class="py-0">
-                <VCol class="pt-0 pb-2">
-                  <FloatField ref="napFieldRef" v-model="formData.nap" label="Nap" :max="10" :required="false"
-                    :on-next="() => moveToNextField(4)" :on-previous="() => moveToPreviousField(4)" />
-                </VCol>
-                <VCol class="pt-0 pb-2">
-                  <FloatField ref="workedFieldRef" v-model="formData.worked" label="Worked" :max="24" :required="false"
-                    :on-next="() => moveToNextField(5)" :on-previous="() => moveToPreviousField(5)" />
+                  <TimeField ref="sleepRef" v-model="formData.sleep" label="Sleep" :default-to-future="true"
+                    :future-minutes="25" :required="true"
+                    :on-next="focusRules['sleep']" :on-previous="prevRules['sleep']" />
                 </VCol>
               </VRow>
 
               <VRow class="py-0">
                 <VCol class="pt-0 pb-2">
-                  <FloatField ref="stressFieldRef" v-model="formData.stress" label="Stress" :max="10" :required="true"
-                    :on-next="() => moveToNextField(6)" :on-previous="() => moveToPreviousField(6)" />
+                  <FloatField ref="napRef" v-model="formData.nap" label="Nap" :max="10" :required="false"
+                    :on-next="focusRules['nap']" :on-previous="prevRules['nap']" />
                 </VCol>
                 <VCol class="pt-0 pb-2">
-                  <FloatField ref="tiredFieldRef" v-model="formData.tired" label="Tired" :max="10" :required="true"
-                    :on-next="() => moveToNextField(7)" :on-previous="() => moveToPreviousField(7)" />
+                  <FloatField ref="workedRef" v-model="formData.worked" label="Worked" :max="24" :required="false"
+                    :on-next="focusRules['worked']" :on-previous="prevRules['worked']" />
                 </VCol>
               </VRow>
 
-              <AutocompleteField ref="gameFieldRef" v-model="formData.game" label="Game" :suggestions="gameSuggestions"
-                :required="false" :on-next="() => moveToNextField(8)" :on-previous="() => moveToPreviousField(8)" />
+              <VRow class="py-0">
+                <VCol class="pt-0 pb-2">
+                  <FloatField ref="stressRef" v-model="formData.stress" label="Stress" :max="10" :required="true"
+                    :on-next="focusRules['stress']" :on-previous="prevRules['stress']" />
+                </VCol>
+                <VCol class="pt-0 pb-2">
+                  <FloatField ref="tiredRef" v-model="formData.tired" label="Tired" :max="10" :required="true"
+                    :on-next="focusRules['tired']" :on-previous="prevRules['tired']" />
+                </VCol>
+              </VRow>
 
-              <AutocompleteField ref="musicFieldRef" v-model="formData.music" label="Music"
-                :suggestions="musicSuggestions" :required="true" :on-next="() => moveToNextField(9)"
-                :on-previous="() => moveToPreviousField(9)" />
+              <AutocompleteField ref="gameRef" v-model="formData.game" label="Game" :suggestions="gameSuggestions"
+                :required="false" :on-next="focusRules['game']" :on-previous="prevRules['game']" />
 
-              <ListField ref="gratefulFieldRef" v-model="formData.grateful" label="Grateful" :required="true"
-                :on-next="() => moveToNextField(10)" :on-previous="() => moveToPreviousField(10)" />
+              <AutocompleteField ref="musicRef" v-model="formData.music" label="Music"
+                :suggestions="musicSuggestions" :required="true"
+                :on-next="focusRules['music']" :on-previous="prevRules['music']" />
 
-              <ListField ref="learnFieldRef" v-model="formData.learn" label="Learn (Ctrl + y)" :required="true"
-                :on-next="() => moveToNextField(11)" :on-previous="() => moveToPreviousField(11)" />
+              <ListField ref="gratefulRef" v-model="formData.grateful" label="Grateful" :required="true"
+                :on-next="focusRules['grateful']" :on-previous="prevRules['grateful']" />
 
-              <AutocompleteField ref="exerciseFieldRef" v-model="formData.exercise" label="Exercise"
-                :suggestions="exerciseSuggestions" :required="true" :on-next="() => moveToNextField(12)"
-                :on-previous="() => moveToPreviousField(12)" />
+              <ListField ref="learnRef" v-model="formData.learn" label="Learn (Ctrl+Y)" :required="true"
+                :on-next="focusRules['learn']" :on-previous="prevRules['learn']" />
 
-              <FloatField ref="rememberFieldRef" v-model="formData.remember" label="Remember" :max="10" :required="true"
-                :on-next="() => moveToNextField(13)" :on-previous="() => moveToPreviousField(13)" />
+              <AutocompleteField ref="exerciseRef" v-model="formData.exercise" label="Exercise"
+                :suggestions="exerciseSuggestions" :required="true"
+                :on-next="focusRules['exercise']" :on-previous="prevRules['exercise']" />
 
-              <FloatField ref="dayRatingFieldRef" v-model="formData.dayRating" label="Day rating" :max="10"
-                :required="true" :on-next="() => moveToNextField(14)" :on-previous="() => moveToPreviousField(14)" />
+              <FloatField ref="rememberRef" v-model="formData.remember" label="Remember" :max="10" :required="true"
+                :on-next="focusRules['remember']" :on-previous="prevRules['remember']" />
 
-              <IntField ref="feelingFieldRef" v-model="formData.feeling" label="Feeling" :max="100" :required="true"
-                :on-next="() => moveToNextField(15)" :on-previous="() => moveToPreviousField(15)" />
+              <FloatField ref="dayRatingRef" v-model="formData.dayRating" label="Day rating" :max="10" :required="true"
+                :on-next="focusRules['dayRating']" :on-previous="prevRules['dayRating']" />
 
-              <StringField ref="whyFieldRef" v-model="formData.why" label="Why" :required="true"
-                :on-next="() => moveToNextField(16)" :on-previous="() => moveToPreviousField(16)" />
+              <IntField ref="feelingRef" v-model="formData.feeling" label="Feeling" :max="100" :required="true"
+                :on-next="focusRules['feeling']" :on-previous="prevRules['feeling']" />
 
-              <AutocompleteListField ref="phaseFieldRef" v-model="formData.phase" label="Phase"
+              <StringField ref="whyRef" v-model="formData.why" label="Why" :required="true"
+                :on-next="focusRules['why']" :on-previous="prevRules['why']" />
+
+              <AutocompleteListField ref="phaseRef" v-model="formData.phase" label="Phase"
                 :suggestions="phaseSuggestions" :required="true" :auto-select="false"
-                :on-next="() => moveToNextField(17)" :on-previous="() => moveToPreviousField(17)" />
+                :on-next="focusRules['phase']" :on-previous="prevRules['phase']" />
 
-              <PatternTextField ref="happenedFieldRef" v-model="formData.happened" label="Happened" :required="true"
-                :on-next="() => moveToNextField(18)" :on-previous="() => moveToPreviousField(18)" />
-              <VBtn size="small" variant="outlined" @click="happenedFieldRef?.capitalize()">
+              <PatternTextField ref="happenedRef" v-model="formData.happened" label="Happened" :required="true"
+                :mappings="dbMappings" :list-values="dbListValues"
+                :on-next="focusRules['happened']" :on-previous="prevRules['happened']" />
+              <VBtn size="small" variant="outlined" @click="formRefs.happened.value?.capitalize()">
                 Capitalize
               </VBtn>
 
-              <TimeDisplay ref="timeDisplayRef" v-model="formData.time" />
+              <TimeDisplay v-model="formData.time" />
 
-              <StringField ref="dayNameFieldRef" v-model="formData.dayName" label="Day name" :required="false"
-                :on-next="copyToClipboard" :on-previous="() => moveToPreviousField(19)" />
+              <StringField ref="dayNameRef" v-model="formData.dayName" label="Day name" :required="false"
+                :on-next="focusRules['dayName']" :on-previous="prevRules['dayName']" />
 
               <VDivider class="my-4" />
 
               <!-- Sleep Time Message -->
-              <div v-if="sleepTimeMessage" class="mb-4">
-                <VChip color="info" variant="outlined" size="small">
-                  {{ sleepTimeMessage }}
-                </VChip>
+              <div v-if="sleepTimeMessage">
+                <VChip color="info" variant="outlined" size="small">{{ sleepTimeMessage }}</VChip>
               </div>
 
               <!-- Validation Errors -->
-              <div v-if="validationErrors.length > 0" class="mb-4">
-                <div class="text-body-1 font-weight-bold mb-2 text-error">
-                  Missing or invalid fields:
-                </div>
+              <div v-if="validationErrors.length > 0">
+                <div class="text-body-1 font-weight-bold mb-2 text-error">Missing or invalid fields:</div>
                 <div class="d-flex flex-wrap ga-2">
                   <VChip v-for="error in validationErrors" :key="error" color="error" variant="outlined" size="small"
                     style="cursor: pointer;" @click="focusFieldByError(error)">
@@ -626,8 +482,8 @@ document.addEventListener('keydown', function (event) {
               </div>
 
               <div class="d-flex justify-center flex-wrap ga-4">
-                <VBtn :color="copySuccess ? 'success' : 'primary'" size="large" class="text-h6" @click="copyToClipboard"
-                  :prepend-icon="copySuccess ? 'mdi-check' : 'mdi-content-copy'">
+                <VBtn :color="copySuccess ? 'success' : 'primary'" size="large" class="text-h6"
+                  @click="copyToClipboard" :prepend-icon="copySuccess ? 'mdi-check' : 'mdi-content-copy'">
                   {{ copySuccess ? 'Copied!' : 'Copy to Clipboard' }}
                 </VBtn>
                 <VBtn ref="clearButtonRef" color="error" size="large" class="text-h6" prepend-icon="mdi-delete"
@@ -635,7 +491,9 @@ document.addEventListener('keydown', function (event) {
                   Clear
                 </VBtn>
               </div>
-              <div class="d-flex justify-center" style="color: gray;">Ctrl+y opens youtube history</div>
+              <div class="d-flex justify-center" style="color: gray;">
+                Ctrl+S copy · Ctrl+Y YouTube · Ctrl+G My Activity
+              </div>
             </div>
           </VCardText>
         </VCard>

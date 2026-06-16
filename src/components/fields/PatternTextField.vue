@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue';
 import { VTextarea } from 'vuetify/components';
-import { mappings } from '@/assets/mappings';
-import { nameMappings } from '@/assets/nameMappings';
-import { matchPattern, expandValue } from '@/lib/patternMatcher';
+import type { MappingInstance, ListValue } from '@/lib/db';
+import { expandToken } from '@/lib/patternMatcher';
 
 const props = defineProps<{
   modelValue: string;
@@ -11,6 +10,8 @@ const props = defineProps<{
   onNext?: () => void;
   onPrevious?: () => void;
   required?: boolean;
+  mappings?: MappingInstance[];
+  listValues?: ListValue[];
 }>();
 
 const emit = defineEmits<{
@@ -21,36 +22,27 @@ const textareaRef = ref<InstanceType<typeof VTextarea> | null>(null);
 
 const value = computed({
   get: () => props.modelValue,
-  set: (val) => emit('update:modelValue', val)
+  set: (val) => emit('update:modelValue', val),
 });
 
-// Capitalize sentences after pattern matching
 const capitalizeSentences = (text: string): string => {
   if (!text) return text;
-  let capitalized = text;
-  capitalized = capitalized.replace(/([.!?]\s+)([a-z])/g, (match, p1, p2) => {
-    return p1 + p2.toUpperCase();
-  });
-  if (capitalized.length > 0 && /^[a-z]/.test(capitalized)) {
-    capitalized = capitalized.charAt(0).toUpperCase() + capitalized.slice(1);
+  let out = text.replace(/([.!?]\s+)([a-z])/g, (_m, p1, p2) => p1 + p2.toUpperCase());
+  if (out.length > 0 && /^[a-z]/.test(out)) {
+    out = out.charAt(0).toUpperCase() + out.slice(1);
   }
-  return capitalized;
+  return out;
 };
 
 const focus = () => {
   const textarea = textareaRef.value?.$el.querySelector('textarea');
-  if (textarea) {
-    textarea.focus();
-    // Don't auto-select for happened field
-  }
+  textarea?.focus();
 };
 
 const capitalize = () => {
   if (!value.value) return;
   const capitalized = capitalizeSentences(value.value);
-  if (capitalized !== value.value) {
-    value.value = capitalized;
-  }
+  if (capitalized !== value.value) value.value = capitalized;
 };
 
 defineExpose({ focus, capitalize });
@@ -65,7 +57,7 @@ const handleTextareaKeydown = (e: KeyboardEvent) => {
   }
 };
 
-const handleInput = async (event: any): Promise<void> => {
+const handleInput = async (event: Event): Promise<void> => {
   const textarea = event.target as HTMLTextAreaElement;
   if (!textarea) return;
 
@@ -75,72 +67,26 @@ const handleInput = async (event: any): Promise<void> => {
   value.value = val;
 
   const textBeforeCursor = val.slice(0, cursorPosition);
+  if (!textBeforeCursor.endsWith(' ')) return;
 
-  if (textBeforeCursor.endsWith(' ')) {
-    const tokens = textBeforeCursor.trimEnd().split(/\s+/);
-    const lastWord = tokens[tokens.length - 1];
-    if (!lastWord) return;
+  const tokens = textBeforeCursor.trimEnd().split(/\s+/);
+  const lastToken = tokens[tokens.length - 1];
+  if (!lastToken) return;
 
-    let matchFound = false;
-    let replacementText = "";
-    let matchedKeyText = "";
+  const mappings = props.mappings ?? [];
+  const listValues = props.listValues ?? [];
 
-    for (const rule of mappings.value) {
-      const key = rule.key.trim();
-      if (!key) continue;
+  const expanded = expandToken(lastToken, mappings, listValues);
+  if (expanded === null) return;
 
-      const hasNameSlot = key.includes('<p,>') || key.includes('<p>');
+  const lengthToRemove = lastToken.length + 1;
+  const before = textBeforeCursor.slice(0, -lengthToRemove);
+  const after = val.slice(cursorPosition);
 
-      if (hasNameSlot) {
-        const matchResult = matchPattern(lastWord, key, nameMappings.value);
-        if (matchResult.matched) {
-          matchFound = true;
-          replacementText = expandValue(rule.value, matchResult.matchedNames);
-          matchedKeyText = lastWord;
-          break;
-        }
-        continue;
-      }
-
-      const isRegex = key.startsWith('/') && key.lastIndexOf('/') > 0;
-
-      if (isRegex) {
-        try {
-          const pattern = key.slice(1, key.lastIndexOf('/'));
-          const flags = key.slice(key.lastIndexOf('/') + 1);
-          const regex = new RegExp(`^${pattern}$`, flags);
-
-          if (regex.test(lastWord)) {
-            matchFound = true;
-            replacementText = rule.value;
-            matchedKeyText = lastWord;
-            break;
-          }
-        } catch (e) {
-          console.error("Invalid Regex pattern:", key);
-        }
-      } else if (key === lastWord) {
-        matchFound = true;
-        replacementText = rule.value;
-        matchedKeyText = key;
-        break;
-      }
-    }
-
-    if (matchFound) {
-      const lengthToRemove = matchedKeyText.length + 1;
-      const textBeforeTarget = textBeforeCursor.slice(0, -lengthToRemove);
-      const textAfterCursor = val.slice(cursorPosition);
-
-      let newValue = textBeforeTarget + replacementText + " " + textAfterCursor;
-      const newCursorPos = textBeforeTarget.length + replacementText.length + 1;
-
-      value.value = newValue;
-      await nextTick();
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
-    }
-  }
-
+  value.value = before + expanded + ' ' + after;
+  const newCursor = before.length + expanded.length + 1;
+  await nextTick();
+  textarea.setSelectionRange(newCursor, newCursor);
 };
 </script>
 
