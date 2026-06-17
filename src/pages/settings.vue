@@ -2,11 +2,10 @@
 import { ref, watch, computed, onMounted } from 'vue';
 import {
   VContainer, VCard, VCardText, VCardTitle, VTabs, VTab, VTabsWindow, VTabsWindowItem,
-  VDataTable, VBtn, VDialog, VTextField, VCheckbox, VSelect, VIcon,
+  VDataTable, VBtn, VDialog, VTextField, VCheckbox, VSelect,
   VSnackbar,
 } from 'vuetify/components';
 import {
-  getDb, saveDb, loadDbFromFile,
   getMappingInstances, insertMappingInstance, updateMappingInstance, deleteMappingInstance,
   getListValues, insertListValue, updateListValue, deleteListValue,
   getMappingTypes, insertMappingType, updateMappingType, deleteMappingType,
@@ -23,18 +22,13 @@ const listValues = ref<ListValue[]>([]);
 const mappingTypes = ref<MappingType[]>([]);
 const shortcutGroups = ref<ShortcutGroup[]>([]);
 
-let db: Awaited<ReturnType<typeof getDb>>;
-
-const load = async () => {
-  db = await getDb();
-  refresh();
-};
-
-const refresh = () => {
-  mappings.value = getMappingInstances(db);
-  listValues.value = getListValues(db);
-  mappingTypes.value = getMappingTypes(db);
-  shortcutGroups.value = getShortcutGroups(db);
+const refresh = async () => {
+  [mappings.value, listValues.value, mappingTypes.value, shortcutGroups.value] = await Promise.all([
+    getMappingInstances(),
+    getListValues(),
+    getMappingTypes(),
+    getShortcutGroups(),
+  ]);
 };
 
 const notify = (msg: string) => {
@@ -42,7 +36,7 @@ const notify = (msg: string) => {
   snackbar.value = true;
 };
 
-onMounted(load);
+onMounted(refresh);
 
 // ── Mapping instances ────────────────────────────────────────────────────────
 
@@ -61,22 +55,22 @@ const openEditMapping = (row: MappingInstance) => {
   mappingDialog.value = true;
 };
 
-const saveMapping = () => {
+const saveMapping = async () => {
   const { id, name, expansion, implicit_add_base } = mappingForm.value;
   if (!name.trim() || !expansion.trim()) return;
   if (id === null) {
-    insertMappingInstance(db, name.trim(), expansion.trim(), implicit_add_base);
+    await insertMappingInstance(name.trim(), expansion.trim(), implicit_add_base);
   } else {
-    updateMappingInstance(db, id, name.trim(), expansion.trim(), implicit_add_base);
+    await updateMappingInstance(id, name.trim(), expansion.trim(), implicit_add_base);
   }
   mappingDialog.value = false;
-  refresh();
+  await refresh();
   notify('Saved');
 };
 
-const deleteMapping = (id: number) => {
-  deleteMappingInstance(db, id);
-  refresh();
+const deleteMapping = async (id: number) => {
+  await deleteMappingInstance(id);
+  await refresh();
   notify('Deleted');
 };
 
@@ -199,22 +193,22 @@ const openEditListValue = (row: ListValue) => {
   listValueDialog.value = true;
 };
 
-const saveListValue = () => {
+const saveListValue = async () => {
   const { id, abbreviation, value, type_id } = listValueForm.value;
   if (!abbreviation.trim() || !value.trim() || abbrevTaken.value) return;
   if (id === null) {
-    insertListValue(db, abbreviation.trim(), value.trim(), type_id.trim());
+    await insertListValue(abbreviation.trim(), value.trim(), type_id.trim());
   } else {
-    updateListValue(db, id, abbreviation.trim(), value.trim(), type_id.trim());
+    await updateListValue(id, abbreviation.trim(), value.trim(), type_id.trim());
   }
   listValueDialog.value = false;
-  refresh();
+  await refresh();
   notify('Saved');
 };
 
-const deleteListVal = (id: number) => {
-  deleteListValue(db, id);
-  refresh();
+const deleteListVal = async (id: number) => {
+  await deleteListValue(id);
+  await refresh();
   notify('Deleted');
 };
 
@@ -240,22 +234,22 @@ const openEditType = (row: MappingType) => {
   typeDialog.value = true;
 };
 
-const saveType = () => {
+const saveType = async () => {
   const { id, name, isEdit } = typeForm.value;
   if (!id.trim() || !name.trim()) return;
   if (isEdit) {
-    updateMappingType(db, id.trim(), name.trim());
+    await updateMappingType(id.trim(), name.trim());
   } else {
-    insertMappingType(db, id.trim(), name.trim());
+    await insertMappingType(id.trim(), name.trim());
   }
   typeDialog.value = false;
-  refresh();
+  await refresh();
   notify('Saved');
 };
 
-const deleteType = (id: string) => {
-  deleteMappingType(db, id);
-  refresh();
+const deleteType = async (id: string) => {
+  await deleteMappingType(id);
+  await refresh();
   notify('Deleted');
 };
 
@@ -282,22 +276,22 @@ const openEditGroup = (row: ShortcutGroup) => {
   groupDialog.value = true;
 };
 
-const saveGroup = () => {
+const saveGroup = async () => {
   const { id, shortcode, expansion } = groupForm.value;
   if (!shortcode.trim() || !expansion.trim()) return;
   if (id === null) {
-    insertShortcutGroup(db, shortcode.trim(), expansion.trim());
+    await insertShortcutGroup(shortcode.trim(), expansion.trim());
   } else {
-    updateShortcutGroup(db, id, shortcode.trim(), expansion.trim());
+    await updateShortcutGroup(id, shortcode.trim(), expansion.trim());
   }
   groupDialog.value = false;
-  refresh();
+  await refresh();
   notify('Saved');
 };
 
-const deleteGroup = (id: number) => {
-  deleteShortcutGroup(db, id);
-  refresh();
+const deleteGroup = async (id: number) => {
+  await deleteShortcutGroup(id);
+  await refresh();
   notify('Deleted');
 };
 
@@ -307,20 +301,6 @@ const groupHeaders = [
   { title: '', key: 'actions', sortable: false, align: 'end' as const },
 ];
 
-// ── DB file ──────────────────────────────────────────────────────────────────
-
-const handleDbFileInput = async (e: Event) => {
-  const file = (e.target as HTMLInputElement).files?.[0];
-  if (!file) return;
-  await loadDbFromFile(file);
-  db = await getDb();
-  refresh();
-  notify('Database loaded');
-};
-
-const handleSaveDb = () => {
-  saveDb(db);
-};
 </script>
 
 <template>
@@ -329,17 +309,6 @@ const handleSaveDb = () => {
       <VCol cols="12" md="10" lg="8" xl="6">
         <VCard variant="outlined" class="pa-4">
           <VCardTitle class="text-h5 mb-2">Settings</VCardTitle>
-
-          <!-- DB controls -->
-          <div class="d-flex ga-3 mb-4 flex-wrap">
-            <VBtn size="small" variant="outlined" prepend-icon="mdi-database-export" @click="handleSaveDb">
-              Save DB
-            </VBtn>
-            <VBtn size="small" variant="outlined" prepend-icon="mdi-database-import" tag="label">
-              Load DB
-              <input type="file" accept=".db" style="display:none" @change="handleDbFileInput" />
-            </VBtn>
-          </div>
 
           <VTabs v-model="tab" class="mb-4">
             <VTab value="mappings">Mappings</VTab>

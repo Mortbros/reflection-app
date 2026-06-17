@@ -17,7 +17,7 @@ import { musicSuggestions } from '@/assets/musicSuggestions';
 import { phaseSuggestions } from '@/assets/phaseSuggestions';
 import { gameSuggestions } from '@/assets/gameSuggestions';
 import { getTodayDate, getYesterdayDate } from '@/lib/fieldUtils';
-import { getDb, getMappingInstances, getListValues } from '@/lib/db';
+import { getMappingInstances, getListValues } from '@/lib/db';
 import type { MappingInstance, ListValue } from '@/lib/db';
 
 const STORAGE_KEY = 'daily_tracking_form_data';
@@ -28,9 +28,8 @@ const dbListValues = ref<ListValue[]>([]);
 const dbLoaded = ref(false);
 
 const loadDb = async () => {
-  const db = await getDb();
-  dbMappings.value = getMappingInstances(db);
-  dbListValues.value = getListValues(db);
+  dbMappings.value = await getMappingInstances();
+  dbListValues.value = await getListValues();
   dbLoaded.value = true;
 };
 
