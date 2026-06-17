@@ -22,3 +22,10 @@ CREATE TABLE IF NOT EXISTS shortcut_group (
   shortcode TEXT NOT NULL UNIQUE,
   expansion TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS suggestion (
+  id INTEGER PRIMARY KEY,
+  field TEXT NOT NULL,
+  value TEXT NOT NULL,
+  UNIQUE(field, value)
+);
