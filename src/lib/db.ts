@@ -1,6 +1,5 @@
-import SqlJsModule, { type Database } from 'sql.js'
-// sql.js ships CJS; after Vite pre-bundling, the factory may land on .default or the module itself
-const initSqlJs: typeof SqlJsModule = (SqlJsModule as any).default ?? SqlJsModule
+// All DB access goes through the Vite dev server SQLite middleware.
+// No sql.js in the browser — the server owns the .db file on disk.
 
 export interface MappingInstance {
   id: number
@@ -27,199 +26,132 @@ export interface ShortcutGroup {
   expansion: string
 }
 
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS mapping_type (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS list_value (
-  id INTEGER PRIMARY KEY,
-  abbreviation TEXT NOT NULL,
-  value TEXT NOT NULL,
-  type_id TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS mapping_instance (
-  id INTEGER PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  expansion TEXT NOT NULL,
-  implicit_add_base INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS shortcut_group (
-  id INTEGER PRIMARY KEY,
-  shortcode TEXT NOT NULL UNIQUE,
-  expansion TEXT NOT NULL
-);
-`
+// ── Transport ────────────────────────────────────────────────────────────────
 
-const LS_KEY = 'mappings_db_v1'
+type SqlJsResult = { columns: string[]; values: unknown[][] }[]
 
-let _db: Database | null = null
-
-function persist(db: Database): void {
-  try {
-    const data = db.export()
-    // Store as comma-separated numbers — avoids btoa surrogate issues with raw binary
-    localStorage.setItem(LS_KEY, JSON.stringify(Array.from(data)))
-  } catch {
-    // localStorage full — silently ignore; data is still in memory
-  }
+async function query(sql: string, params?: unknown[]): Promise<SqlJsResult> {
+  const res = await fetch('/api/db/query', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql, params }),
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
 }
 
-export async function getDb(): Promise<Database> {
-  if (_db) return _db
-
-  const SQL = await initSqlJs({ locateFile: () => '/sql-wasm.wasm' })
-
-  const saved = localStorage.getItem(LS_KEY)
-  if (saved) {
-    try {
-      const bytes = new Uint8Array(JSON.parse(saved))
-      _db = new SQL.Database(bytes)
-      _db.run(SCHEMA) // idempotent — adds any new tables if schema evolved
-    } catch {
-      _db = new SQL.Database()
-      _db.run(SCHEMA)
-    }
-  } else {
-    _db = new SQL.Database()
-    _db.run(SCHEMA)
-  }
-
-  return _db
+async function exec(sql: string, params?: unknown[]): Promise<void> {
+  const res = await fetch('/api/db/exec', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql, params }),
+  })
+  if (!res.ok) throw new Error(await res.text())
 }
 
-/** Export the current DB as a downloadable .db file (for backup / cross-device sync). */
-export function saveDb(db: Database): void {
-  const data = db.export()
-  const blob = new Blob([data], { type: 'application/octet-stream' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'mappings.db'
-  a.click()
-  URL.revokeObjectURL(url)
+/** Map sql.js result rows to typed objects. */
+function toObjects<T>(results: SqlJsResult): T[] {
+  if (!results.length) return []
+  const { columns, values } = results[0]
+  return values.map(
+    (row) => Object.fromEntries(columns.map((col, i) => [col, row[i]])) as T
+  )
 }
 
-/** Replace the in-memory DB with one loaded from a .db file and persist it. */
-export async function loadDbFromFile(file: File): Promise<void> {
-  const SQL = await initSqlJs({ locateFile: () => '/sql-wasm.wasm' })
-  const buf = await file.arrayBuffer()
-  _db = new SQL.Database(new Uint8Array(buf))
-  _db.run(SCHEMA)
-  persist(_db)
+// ── Mapping instances ────────────────────────────────────────────────────────
+
+export async function getMappingInstances(): Promise<MappingInstance[]> {
+  const rows = toObjects<{ id: number; name: string; expansion: string; implicit_add_base: number }>(
+    await query('SELECT id, name, expansion, implicit_add_base FROM mapping_instance ORDER BY name')
+  )
+  return rows.map((r) => ({ ...r, implicit_add_base: r.implicit_add_base === 1 }))
 }
 
-// ── Mapping instances ───────────────────────────────────────────────────────
-
-export function getMappingInstances(db: Database): MappingInstance[] {
-  const result = db.exec('SELECT id, name, expansion, implicit_add_base FROM mapping_instance ORDER BY name')
-  if (!result.length) return []
-  return result[0].values.map(([id, name, expansion, implicit_add_base]) => ({
-    id: id as number,
-    name: name as string,
-    expansion: expansion as string,
-    implicit_add_base: (implicit_add_base as number) === 1,
-  }))
-}
-
-export function insertMappingInstance(db: Database, name: string, expansion: string, implicitAddBase = false): void {
-  db.run('INSERT INTO mapping_instance (name, expansion, implicit_add_base) VALUES (?, ?, ?)', [name, expansion, implicitAddBase ? 1 : 0])
+export async function insertMappingInstance(name: string, expansion: string, implicitAddBase = false): Promise<void> {
+  await exec(
+    'INSERT INTO mapping_instance (name, expansion, implicit_add_base) VALUES (?, ?, ?)',
+    [name, expansion, implicitAddBase ? 1 : 0]
+  )
   if (implicitAddBase) {
     const base = name.replace(/<[^>]*>/g, '').trim()
     if (base && base !== name) {
       const baseExpansion = expansion.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
-      db.run('INSERT OR IGNORE INTO mapping_instance (name, expansion, implicit_add_base) VALUES (?, ?, 0)', [base, baseExpansion])
+      await exec(
+        'INSERT OR IGNORE INTO mapping_instance (name, expansion, implicit_add_base) VALUES (?, ?, 0)',
+        [base, baseExpansion]
+      )
     }
   }
-  persist(db)
 }
 
-export function updateMappingInstance(db: Database, id: number, name: string, expansion: string, implicitAddBase: boolean): void {
-  db.run('UPDATE mapping_instance SET name = ?, expansion = ?, implicit_add_base = ? WHERE id = ?', [name, expansion, implicitAddBase ? 1 : 0, id])
-  persist(db)
+export async function updateMappingInstance(id: number, name: string, expansion: string, implicitAddBase: boolean): Promise<void> {
+  await exec(
+    'UPDATE mapping_instance SET name = ?, expansion = ?, implicit_add_base = ? WHERE id = ?',
+    [name, expansion, implicitAddBase ? 1 : 0, id]
+  )
 }
 
-export function deleteMappingInstance(db: Database, id: number): void {
-  db.run('DELETE FROM mapping_instance WHERE id = ?', [id])
-  persist(db)
+export async function deleteMappingInstance(id: number): Promise<void> {
+  await exec('DELETE FROM mapping_instance WHERE id = ?', [id])
 }
 
-// ── List values ─────────────────────────────────────────────────────────────
+// ── List values ──────────────────────────────────────────────────────────────
 
-export function getListValues(db: Database, typeId?: string): ListValue[] {
-  const result = typeId
-    ? db.exec('SELECT id, abbreviation, value, type_id FROM list_value WHERE type_id = ? ORDER BY abbreviation', [typeId])
-    : db.exec('SELECT id, abbreviation, value, type_id FROM list_value ORDER BY type_id, abbreviation')
-  if (!result.length) return []
-  return result[0].values.map(([id, abbreviation, value, type_id]) => ({
-    id: id as number,
-    abbreviation: abbreviation as string,
-    value: value as string,
-    type_id: type_id as string,
-  }))
+export async function getListValues(typeId?: string): Promise<ListValue[]> {
+  if (typeId) {
+    return toObjects(
+      await query('SELECT id, abbreviation, value, type_id FROM list_value WHERE type_id = ? ORDER BY abbreviation', [typeId])
+    )
+  }
+  return toObjects(
+    await query('SELECT id, abbreviation, value, type_id FROM list_value ORDER BY type_id, abbreviation')
+  )
 }
 
-export function insertListValue(db: Database, abbreviation: string, value: string, typeId: string): void {
-  db.run('INSERT INTO list_value (abbreviation, value, type_id) VALUES (?, ?, ?)', [abbreviation, value, typeId])
-  persist(db)
+export async function insertListValue(abbreviation: string, value: string, typeId: string): Promise<void> {
+  await exec('INSERT INTO list_value (abbreviation, value, type_id) VALUES (?, ?, ?)', [abbreviation, value, typeId])
 }
 
-export function updateListValue(db: Database, id: number, abbreviation: string, value: string, typeId: string): void {
-  db.run('UPDATE list_value SET abbreviation = ?, value = ?, type_id = ? WHERE id = ?', [abbreviation, value, typeId, id])
-  persist(db)
+export async function updateListValue(id: number, abbreviation: string, value: string, typeId: string): Promise<void> {
+  await exec('UPDATE list_value SET abbreviation = ?, value = ?, type_id = ? WHERE id = ?', [abbreviation, value, typeId, id])
 }
 
-export function deleteListValue(db: Database, id: number): void {
-  db.run('DELETE FROM list_value WHERE id = ?', [id])
-  persist(db)
+export async function deleteListValue(id: number): Promise<void> {
+  await exec('DELETE FROM list_value WHERE id = ?', [id])
 }
 
 // ── Mapping types ────────────────────────────────────────────────────────────
 
-export function getMappingTypes(db: Database): MappingType[] {
-  const result = db.exec('SELECT id, name FROM mapping_type ORDER BY id')
-  if (!result.length) return []
-  return result[0].values.map(([id, name]) => ({ id: id as string, name: name as string }))
+export async function getMappingTypes(): Promise<MappingType[]> {
+  return toObjects(await query('SELECT id, name FROM mapping_type ORDER BY id'))
 }
 
-export function insertMappingType(db: Database, id: string, name: string): void {
-  db.run('INSERT INTO mapping_type (id, name) VALUES (?, ?)', [id, name])
-  persist(db)
+export async function insertMappingType(id: string, name: string): Promise<void> {
+  await exec('INSERT INTO mapping_type (id, name) VALUES (?, ?)', [id, name])
 }
 
-export function updateMappingType(db: Database, id: string, name: string): void {
-  db.run('UPDATE mapping_type SET name = ? WHERE id = ?', [name, id])
-  persist(db)
+export async function updateMappingType(id: string, name: string): Promise<void> {
+  await exec('UPDATE mapping_type SET name = ? WHERE id = ?', [name, id])
 }
 
-export function deleteMappingType(db: Database, id: string): void {
-  db.run('DELETE FROM mapping_type WHERE id = ?', [id])
-  persist(db)
+export async function deleteMappingType(id: string): Promise<void> {
+  await exec('DELETE FROM mapping_type WHERE id = ?', [id])
 }
 
 // ── Shortcut groups ──────────────────────────────────────────────────────────
 
-export function getShortcutGroups(db: Database): ShortcutGroup[] {
-  const result = db.exec('SELECT id, shortcode, expansion FROM shortcut_group ORDER BY shortcode')
-  if (!result.length) return []
-  return result[0].values.map(([id, shortcode, expansion]) => ({
-    id: id as number,
-    shortcode: shortcode as string,
-    expansion: expansion as string,
-  }))
+export async function getShortcutGroups(): Promise<ShortcutGroup[]> {
+  return toObjects(await query('SELECT id, shortcode, expansion FROM shortcut_group ORDER BY shortcode'))
 }
 
-export function insertShortcutGroup(db: Database, shortcode: string, expansion: string): void {
-  db.run('INSERT INTO shortcut_group (shortcode, expansion) VALUES (?, ?)', [shortcode, expansion])
-  persist(db)
+export async function insertShortcutGroup(shortcode: string, expansion: string): Promise<void> {
+  await exec('INSERT INTO shortcut_group (shortcode, expansion) VALUES (?, ?)', [shortcode, expansion])
 }
 
-export function updateShortcutGroup(db: Database, id: number, shortcode: string, expansion: string): void {
-  db.run('UPDATE shortcut_group SET shortcode = ?, expansion = ? WHERE id = ?', [shortcode, expansion, id])
-  persist(db)
+export async function updateShortcutGroup(id: number, shortcode: string, expansion: string): Promise<void> {
+  await exec('UPDATE shortcut_group SET shortcode = ?, expansion = ? WHERE id = ?', [shortcode, expansion, id])
 }
 
-export function deleteShortcutGroup(db: Database, id: number): void {
-  db.run('DELETE FROM shortcut_group WHERE id = ?', [id])
-  persist(db)
+export async function deleteShortcutGroup(id: number): Promise<void> {
+  await exec('DELETE FROM shortcut_group WHERE id = ?', [id])
 }
