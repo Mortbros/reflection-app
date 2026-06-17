@@ -175,7 +175,7 @@ export function expandValue(template: string, matchedNamesByType: Map<string, st
   return template.replace(/<([a-zA-Z][a-zA-Z0-9]*)(,?)>/g, (_match, typeId, comma) => {
     const names = matchedNamesByType.get(typeId) ?? []
     if (names.length === 0) return ''
-    return comma === ',' ? names.join(', ') : (names[0] ?? '')
+    return comma === ',' || names.length > 1 ? names.join(', ') : (names[0] ?? '')
   })
 }
 

@@ -5,7 +5,6 @@ export interface MappingInstance {
   id: number
   name: string
   expansion: string
-  implicit_add_base: boolean
 }
 
 export interface ListValue {
@@ -61,33 +60,22 @@ function toObjects<T>(results: SqlJsResult): T[] {
 // ── Mapping instances ────────────────────────────────────────────────────────
 
 export async function getMappingInstances(): Promise<MappingInstance[]> {
-  const rows = toObjects<{ id: number; name: string; expansion: string; implicit_add_base: number }>(
-    await query('SELECT id, name, expansion, implicit_add_base FROM mapping_instance ORDER BY name')
+  return toObjects(
+    await query('SELECT id, name, expansion FROM mapping_instance ORDER BY name')
   )
-  return rows.map((r) => ({ ...r, implicit_add_base: r.implicit_add_base === 1 }))
 }
 
-export async function insertMappingInstance(name: string, expansion: string, implicitAddBase = false): Promise<void> {
+export async function insertMappingInstance(name: string, expansion: string): Promise<void> {
   await exec(
-    'INSERT INTO mapping_instance (name, expansion, implicit_add_base) VALUES (?, ?, ?)',
-    [name, expansion, implicitAddBase ? 1 : 0]
+    'INSERT INTO mapping_instance (name, expansion) VALUES (?, ?)',
+    [name, expansion]
   )
-  if (implicitAddBase) {
-    const base = name.replace(/<[^>]*>/g, '').trim()
-    if (base && base !== name) {
-      const baseExpansion = expansion.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
-      await exec(
-        'INSERT OR IGNORE INTO mapping_instance (name, expansion, implicit_add_base) VALUES (?, ?, 0)',
-        [base, baseExpansion]
-      )
-    }
-  }
 }
 
-export async function updateMappingInstance(id: number, name: string, expansion: string, implicitAddBase: boolean): Promise<void> {
+export async function updateMappingInstance(id: number, name: string, expansion: string): Promise<void> {
   await exec(
-    'UPDATE mapping_instance SET name = ?, expansion = ?, implicit_add_base = ? WHERE id = ?',
-    [name, expansion, implicitAddBase ? 1 : 0, id]
+    'UPDATE mapping_instance SET name = ?, expansion = ? WHERE id = ?',
+    [name, expansion, id]
   )
 }
 

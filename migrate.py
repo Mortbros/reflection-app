@@ -85,7 +85,7 @@ def migrate_mappings(cur: sqlite3.Cursor, assets: Path) -> None:
     inserted = 0
     for name, expansion in pairs:
         cur.execute(
-            "INSERT OR IGNORE INTO mapping_instance (name, expansion, implicit_add_base) VALUES (?, ?, 0)",
+            "INSERT OR IGNORE INTO mapping_instance (name, expansion) VALUES (?, ?)",
             (name, expansion),
         )
         inserted += cur.rowcount

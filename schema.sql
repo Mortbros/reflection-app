@@ -13,8 +13,7 @@ CREATE TABLE IF NOT EXISTS list_value (
 CREATE TABLE IF NOT EXISTS mapping_instance (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
-  expansion TEXT NOT NULL,
-  implicit_add_base INTEGER NOT NULL DEFAULT 0
+  expansion TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS shortcut_group (

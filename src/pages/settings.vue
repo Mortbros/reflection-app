@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted } from 'vue';
+import { ref, watch, computed, onMounted, useTemplateRef } from 'vue';
+import { useRouter } from 'vue-router';
 import {
   VContainer, VCard, VCardText, VCardTitle, VTabs, VTab, VTabsWindow, VTabsWindowItem,
   VDataTable, VBtn, VDialog, VTextField, VCheckbox, VSelect,
-  VSnackbar,
+  VSnackbar, VRow, VCol, VToolbar, VToolbarTitle,
 } from 'vuetify/components';
 import {
   getMappingInstances, insertMappingInstance, updateMappingInstance, deleteMappingInstance,
@@ -12,6 +13,8 @@ import {
   getShortcutGroups, insertShortcutGroup, updateShortcutGroup, deleteShortcutGroup,
 } from '@/lib/db';
 import type { MappingInstance, ListValue, MappingType, ShortcutGroup } from '@/lib/db';
+
+const router = useRouter();
 
 const tab = ref('mappings');
 const snackbar = ref(false);
@@ -41,27 +44,38 @@ onMounted(refresh);
 // ── Mapping instances ────────────────────────────────────────────────────────
 
 const mappingDialog = ref(false);
-const mappingForm = ref<{ id: number | null; name: string; expansion: string; implicit_add_base: boolean }>({
-  id: null, name: '', expansion: '', implicit_add_base: false,
+const mappingForm = ref<{ id: number | null; name: string; expansion: string; addBase: boolean }>({
+  id: null, name: '', expansion: '', addBase: false,
 });
 
+// Template refs for dialog field navigation
+const mappingNameRef = useTemplateRef<InstanceType<any>>('mappingNameRef');
+const mappingExpansionRef = useTemplateRef<InstanceType<any>>('mappingExpansionRef');
+
 const openAddMapping = () => {
-  mappingForm.value = { id: null, name: '', expansion: '', implicit_add_base: false };
+  mappingForm.value = { id: null, name: '', expansion: '', addBase: false };
   mappingDialog.value = true;
 };
 
 const openEditMapping = (row: MappingInstance) => {
-  mappingForm.value = { id: row.id, name: row.name, expansion: row.expansion, implicit_add_base: row.implicit_add_base };
+  mappingForm.value = { id: row.id, name: row.name, expansion: row.expansion, addBase: false };
   mappingDialog.value = true;
 };
 
 const saveMapping = async () => {
-  const { id, name, expansion, implicit_add_base } = mappingForm.value;
+  const { id, name, expansion, addBase } = mappingForm.value;
   if (!name.trim() || !expansion.trim()) return;
   if (id === null) {
-    await insertMappingInstance(name.trim(), expansion.trim(), implicit_add_base);
+    await insertMappingInstance(name.trim(), expansion.trim());
+    if (addBase) {
+      const baseName = name.trim().replace(/<[^>]*>/g, '').trim();
+      const baseExpansion = expansion.trim().replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+      if (baseName && baseName !== name.trim() && baseExpansion) {
+        await insertMappingInstance(baseName, baseExpansion).catch(() => {/* already exists */});
+      }
+    }
   } else {
-    await updateMappingInstance(id, name.trim(), expansion.trim(), implicit_add_base);
+    await updateMappingInstance(id, name.trim(), expansion.trim());
   }
   mappingDialog.value = false;
   await refresh();
@@ -77,14 +91,12 @@ const deleteMapping = async (id: number) => {
 const mappingHeaders = [
   { title: 'Name', key: 'name' },
   { title: 'Expansion', key: 'expansion' },
-  { title: 'Add base', key: 'implicit_add_base' },
   { title: '', key: 'actions', sortable: false, align: 'end' as const },
 ];
 
 // ── List values ──────────────────────────────────────────────────────────────
 
-/** Generate an abbreviation from a display value.
- *  Strategy: initials of each word → extend with more chars until unique for the type. */
+/** Generate an abbreviation from a display value. */
 function generateAbbreviation(value: string, typeId: string, excludeId: number | null): string {
   const taken = new Set(
     listValues.value
@@ -95,17 +107,12 @@ function generateAbbreviation(value: string, typeId: string, excludeId: number |
   const words = value.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return '';
 
-  // Build candidate sequences: increase character budget until we find something unique
-  // e.g. "Lisa Brown" → "lb" → "lib" → "libr" → "lisab" → ...
   const chars = words.map(w => w.replace(/[^a-z0-9]/g, '')).join('');
 
-  // First try pure initials
   const initials = words.map(w => w[0] ?? '').join('');
   if (!taken.has(initials)) return initials;
 
-  // Then try taking progressively more chars (spread across words first, then just extend)
   for (let budget = 2; budget <= Math.min(chars.length, 8); budget++) {
-    // Distribute the budget across words
     let candidate = '';
     let remaining = budget;
     for (const word of words) {
@@ -118,7 +125,6 @@ function generateAbbreviation(value: string, typeId: string, excludeId: number |
     if (!taken.has(candidate)) return candidate;
   }
 
-  // Fallback: initials + numeric suffix
   for (let i = 2; i < 100; i++) {
     const candidate = initials + i;
     if (!taken.has(candidate)) return candidate;
@@ -140,7 +146,9 @@ const listValueForm = ref<ListValueForm>({
   id: null, abbreviation: '', value: '', type_id: '', abbrevAutoGenerated: true,
 });
 
-// True when abbreviation already belongs to a different row of the same type
+const listValueRef = useTemplateRef<InstanceType<any>>('listValueRef');
+const listAbbrevRef = useTemplateRef<InstanceType<any>>('listAbbrevRef');
+
 const abbrevTaken = computed(() => {
   const { abbreviation, type_id, id } = listValueForm.value;
   if (!abbreviation || !type_id) return false;
@@ -149,14 +157,12 @@ const abbrevTaken = computed(() => {
   );
 });
 
-// Auto-generate abbreviation while abbrevAutoGenerated is true
 watch(() => listValueForm.value.value, (val) => {
   if (listValueForm.value.abbrevAutoGenerated) {
     listValueForm.value.abbreviation = generateAbbreviation(val, listValueForm.value.type_id, listValueForm.value.id);
   }
 });
 
-// Regenerate when type changes too (if still auto-generating)
 watch(() => listValueForm.value.type_id, () => {
   if (listValueForm.value.abbrevAutoGenerated) {
     listValueForm.value.abbreviation = generateAbbreviation(
@@ -173,7 +179,6 @@ const regenerateAbbrev = () => {
 };
 
 const onAbbrevInput = () => {
-  // User typed manually — stop auto-generating
   listValueForm.value.abbrevAutoGenerated = false;
 };
 
@@ -188,7 +193,7 @@ const openEditListValue = (row: ListValue) => {
     abbreviation: row.abbreviation,
     value: row.value,
     type_id: row.type_id,
-    abbrevAutoGenerated: false, // existing value — don't auto-override
+    abbrevAutoGenerated: false,
   };
   listValueDialog.value = true;
 };
@@ -223,6 +228,9 @@ const listValueHeaders = [
 
 const typeDialog = ref(false);
 const typeForm = ref<{ id: string; name: string; isEdit: boolean }>({ id: '', name: '', isEdit: false });
+
+const typeIdRef = useTemplateRef<InstanceType<any>>('typeIdRef');
+const typeNameRef = useTemplateRef<InstanceType<any>>('typeNameRef');
 
 const openAddType = () => {
   typeForm.value = { id: '', name: '', isEdit: false };
@@ -266,6 +274,9 @@ const groupForm = ref<{ id: number | null; shortcode: string; expansion: string 
   id: null, shortcode: '', expansion: '',
 });
 
+const groupShortcodeRef = useTemplateRef<InstanceType<any>>('groupShortcodeRef');
+const groupExpansionRef = useTemplateRef<InstanceType<any>>('groupExpansionRef');
+
 const openAddGroup = () => {
   groupForm.value = { id: null, shortcode: '', expansion: '' };
   groupDialog.value = true;
@@ -304,84 +315,140 @@ const groupHeaders = [
 </script>
 
 <template>
-  <VContainer fluid>
-    <VRow justify="center">
-      <VCol cols="12" md="10" lg="8" xl="6">
-        <VCard variant="outlined" class="pa-4">
-          <VCardTitle class="text-h5 mb-2">Settings</VCardTitle>
+  <VContainer fluid class="pa-0 pa-sm-4">
 
-          <VTabs v-model="tab" class="mb-4">
-            <VTab value="mappings">Mappings</VTab>
-            <VTab value="listValues">List Values</VTab>
-            <VTab value="types">Types</VTab>
-            <VTab value="groups">Shortcut Groups</VTab>
-          </VTabs>
-
-          <VTabsWindow v-model="tab">
-
-            <!-- Mapping instances -->
-            <VTabsWindowItem value="mappings">
-              <VBtn size="small" prepend-icon="mdi-plus" class="mb-3" @click="openAddMapping">Add</VBtn>
-              <VDataTable :headers="mappingHeaders" :items="mappings" density="compact" :items-per-page="25">
-                <template #item.implicit_add_base="{ item }">
-                  {{ item.implicit_add_base ? 'Yes' : '' }}
-                </template>
-                <template #item.actions="{ item }">
-                  <VBtn icon="mdi-pencil" size="x-small" variant="text" @click="openEditMapping(item)" />
-                  <VBtn icon="mdi-delete" size="x-small" variant="text" color="error" @click="deleteMapping(item.id)" />
-                </template>
-              </VDataTable>
-            </VTabsWindowItem>
-
-            <!-- List values -->
-            <VTabsWindowItem value="listValues">
-              <VBtn size="small" prepend-icon="mdi-plus" class="mb-3" @click="openAddListValue">Add</VBtn>
-              <VDataTable :headers="listValueHeaders" :items="listValues" density="compact" :items-per-page="25">
-                <template #item.actions="{ item }">
-                  <VBtn icon="mdi-pencil" size="x-small" variant="text" @click="openEditListValue(item)" />
-                  <VBtn icon="mdi-delete" size="x-small" variant="text" color="error" @click="deleteListVal(item.id)" />
-                </template>
-              </VDataTable>
-            </VTabsWindowItem>
-
-            <!-- Mapping types -->
-            <VTabsWindowItem value="types">
-              <VBtn size="small" prepend-icon="mdi-plus" class="mb-3" @click="openAddType">Add</VBtn>
-              <VDataTable :headers="typeHeaders" :items="mappingTypes" density="compact" :items-per-page="25">
-                <template #item.actions="{ item }">
-                  <VBtn icon="mdi-pencil" size="x-small" variant="text" @click="openEditType(item)" />
-                  <VBtn icon="mdi-delete" size="x-small" variant="text" color="error" @click="deleteType(item.id)" />
-                </template>
-              </VDataTable>
-            </VTabsWindowItem>
-
-            <!-- Shortcut groups -->
-            <VTabsWindowItem value="groups">
-              <VBtn size="small" prepend-icon="mdi-plus" class="mb-3" @click="openAddGroup">Add</VBtn>
-              <VDataTable :headers="groupHeaders" :items="shortcutGroups" density="compact" :items-per-page="25">
-                <template #item.actions="{ item }">
-                  <VBtn icon="mdi-pencil" size="x-small" variant="text" @click="openEditGroup(item)" />
-                  <VBtn icon="mdi-delete" size="x-small" variant="text" color="error" @click="deleteGroup(item.id)" />
-                </template>
-              </VDataTable>
-            </VTabsWindowItem>
-
-          </VTabsWindow>
-        </VCard>
-      </VCol>
+    <!-- Header bar with back button -->
+    <VRow no-gutters align="center" class="mb-2 px-2 px-sm-0">
+      <VBtn
+        icon="mdi-arrow-left"
+        variant="text"
+        @click="router.push('/')"
+        aria-label="Back"
+      />
+      <span class="text-h6 ml-2">Settings</span>
     </VRow>
+
+    <VCard variant="outlined">
+      <VTabs v-model="tab" class="mb-2">
+        <VTab value="mappings">Mappings</VTab>
+        <VTab value="listValues">List Values</VTab>
+        <VTab value="types">Types</VTab>
+        <VTab value="groups">Shortcut Groups</VTab>
+      </VTabs>
+
+      <VCardText class="pa-2 pa-sm-4">
+        <VTabsWindow v-model="tab">
+
+          <!-- Mapping instances -->
+          <VTabsWindowItem value="mappings">
+            <VBtn size="small" prepend-icon="mdi-plus" class="mb-3" @click="openAddMapping">Add</VBtn>
+            <VDataTable
+              :headers="mappingHeaders"
+              :items="mappings"
+              density="compact"
+              :items-per-page="-1"
+              hover
+              @click:row="(_: any, { item }: any) => openEditMapping(item)"
+              style="cursor: pointer"
+            >
+              <template #item.actions="{ item }">
+                <VBtn icon="mdi-delete" size="x-small" variant="text" color="error" @click.stop="deleteMapping(item.id)" />
+              </template>
+              <template #bottom />
+            </VDataTable>
+          </VTabsWindowItem>
+
+          <!-- List values -->
+          <VTabsWindowItem value="listValues">
+            <VBtn size="small" prepend-icon="mdi-plus" class="mb-3" @click="openAddListValue">Add</VBtn>
+            <VDataTable
+              :headers="listValueHeaders"
+              :items="listValues"
+              density="compact"
+              :items-per-page="-1"
+              hover
+              @click:row="(_: any, { item }: any) => openEditListValue(item)"
+              style="cursor: pointer"
+            >
+              <template #item.actions="{ item }">
+                <VBtn icon="mdi-delete" size="x-small" variant="text" color="error" @click.stop="deleteListVal(item.id)" />
+              </template>
+              <template #bottom />
+            </VDataTable>
+          </VTabsWindowItem>
+
+          <!-- Mapping types -->
+          <VTabsWindowItem value="types">
+            <VBtn size="small" prepend-icon="mdi-plus" class="mb-3" @click="openAddType">Add</VBtn>
+            <VDataTable
+              :headers="typeHeaders"
+              :items="mappingTypes"
+              density="compact"
+              :items-per-page="-1"
+              hover
+              @click:row="(_: any, { item }: any) => openEditType(item)"
+              style="cursor: pointer"
+            >
+              <template #item.actions="{ item }">
+                <VBtn icon="mdi-delete" size="x-small" variant="text" color="error" @click.stop="deleteType(item.id)" />
+              </template>
+              <template #bottom />
+            </VDataTable>
+          </VTabsWindowItem>
+
+          <!-- Shortcut groups -->
+          <VTabsWindowItem value="groups">
+            <VBtn size="small" prepend-icon="mdi-plus" class="mb-3" @click="openAddGroup">Add</VBtn>
+            <VDataTable
+              :headers="groupHeaders"
+              :items="shortcutGroups"
+              density="compact"
+              :items-per-page="-1"
+              hover
+              @click:row="(_: any, { item }: any) => openEditGroup(item)"
+              style="cursor: pointer"
+            >
+              <template #item.actions="{ item }">
+                <VBtn icon="mdi-delete" size="x-small" variant="text" color="error" @click.stop="deleteGroup(item.id)" />
+              </template>
+              <template #bottom />
+            </VDataTable>
+          </VTabsWindowItem>
+
+        </VTabsWindow>
+      </VCardText>
+    </VCard>
   </VContainer>
 
   <!-- Mapping dialog -->
-  <VDialog v-model="mappingDialog" max-width="520">
+  <VDialog v-model="mappingDialog" max-width="520" :fullscreen="false" :scrim="true">
     <VCard>
-      <VCardTitle>{{ mappingForm.id === null ? 'Add' : 'Edit' }} Mapping</VCardTitle>
-      <VCardText class="d-flex flex-column ga-3">
-        <VTextField v-model="mappingForm.name" label="Name (e.g. tt<p,>)" density="compact" />
-        <VTextField v-model="mappingForm.expansion" label="Expansion (e.g. talked to <p,>)" density="compact" />
-        <VCheckbox v-model="mappingForm.implicit_add_base" label="Implicitly add base (e.g. also add 'tt')" density="compact" hide-details />
+      <VCardTitle class="pa-4">{{ mappingForm.id === null ? 'Add' : 'Edit' }} Mapping</VCardTitle>
+      <VCardText class="d-flex flex-column ga-3 pt-0">
+        <VTextField
+          ref="mappingNameRef"
+          v-model="mappingForm.name"
+          label="Name (e.g. tt<p,>)"
+          density="compact"
+          autofocus
+          @keydown.enter.prevent="mappingExpansionRef?.focus()"
+        />
+        <VTextField
+          ref="mappingExpansionRef"
+          v-model="mappingForm.expansion"
+          label="Expansion (e.g. talked to <p,>)"
+          density="compact"
+          @keydown.enter.prevent="saveMapping"
+        />
+        <VCheckbox
+          v-if="mappingForm.id === null"
+          v-model="mappingForm.addBase"
+          label="Also add base (e.g. also insert 'tt' → 'talked to')"
+          density="compact"
+          hide-details
+        />
       </VCardText>
-      <div class="d-flex justify-end ga-2 pa-4">
+      <div class="d-flex justify-end ga-2 pa-4 pt-2">
         <VBtn variant="text" @click="mappingDialog = false">Cancel</VBtn>
         <VBtn color="primary" @click="saveMapping">Save</VBtn>
       </div>
@@ -391,13 +458,15 @@ const groupHeaders = [
   <!-- List value dialog -->
   <VDialog v-model="listValueDialog" max-width="440">
     <VCard>
-      <VCardTitle>{{ listValueForm.id === null ? 'Add' : 'Edit' }} List Value</VCardTitle>
-      <VCardText class="d-flex flex-column ga-3">
+      <VCardTitle class="pa-4">{{ listValueForm.id === null ? 'Add' : 'Edit' }} List Value</VCardTitle>
+      <VCardText class="d-flex flex-column ga-3 pt-0">
         <VTextField
+          ref="listValueRef"
           v-model="listValueForm.value"
           label="Value (e.g. Lisa)"
           density="compact"
           autofocus
+          @keydown.enter.prevent="listAbbrevRef?.focus()"
         />
         <VSelect
           v-model="listValueForm.type_id"
@@ -409,6 +478,7 @@ const groupHeaders = [
         />
         <div class="d-flex align-center ga-2">
           <VTextField
+            ref="listAbbrevRef"
             v-model="listValueForm.abbreviation"
             label="Abbreviation (e.g. li)"
             density="compact"
@@ -419,6 +489,7 @@ const groupHeaders = [
             hide-details="auto"
             class="flex-grow-1"
             @input="onAbbrevInput"
+            @keydown.enter.prevent="saveListValue"
           />
           <VBtn
             icon="mdi-refresh"
@@ -429,7 +500,7 @@ const groupHeaders = [
           />
         </div>
       </VCardText>
-      <div class="d-flex justify-end ga-2 pa-4">
+      <div class="d-flex justify-end ga-2 pa-4 pt-2">
         <VBtn variant="text" @click="listValueDialog = false">Cancel</VBtn>
         <VBtn color="primary" :disabled="abbrevTaken || !listValueForm.abbreviation || !listValueForm.value" @click="saveListValue">Save</VBtn>
       </div>
@@ -439,12 +510,26 @@ const groupHeaders = [
   <!-- Mapping type dialog -->
   <VDialog v-model="typeDialog" max-width="420">
     <VCard>
-      <VCardTitle>{{ typeForm.isEdit ? 'Edit' : 'Add' }} Mapping Type</VCardTitle>
-      <VCardText class="d-flex flex-column ga-3">
-        <VTextField v-model="typeForm.id" label="ID / placeholder (e.g. p, pl, t)" density="compact" :disabled="typeForm.isEdit" />
-        <VTextField v-model="typeForm.name" label="Name (e.g. person, place)" density="compact" />
+      <VCardTitle class="pa-4">{{ typeForm.isEdit ? 'Edit' : 'Add' }} Mapping Type</VCardTitle>
+      <VCardText class="d-flex flex-column ga-3 pt-0">
+        <VTextField
+          ref="typeIdRef"
+          v-model="typeForm.id"
+          label="ID / placeholder (e.g. p, pl, t)"
+          density="compact"
+          :disabled="typeForm.isEdit"
+          autofocus
+          @keydown.enter.prevent="typeNameRef?.focus()"
+        />
+        <VTextField
+          ref="typeNameRef"
+          v-model="typeForm.name"
+          label="Name (e.g. person, place)"
+          density="compact"
+          @keydown.enter.prevent="saveType"
+        />
       </VCardText>
-      <div class="d-flex justify-end ga-2 pa-4">
+      <div class="d-flex justify-end ga-2 pa-4 pt-2">
         <VBtn variant="text" @click="typeDialog = false">Cancel</VBtn>
         <VBtn color="primary" @click="saveType">Save</VBtn>
       </div>
@@ -454,12 +539,25 @@ const groupHeaders = [
   <!-- Shortcut group dialog -->
   <VDialog v-model="groupDialog" max-width="520">
     <VCard>
-      <VCardTitle>{{ groupForm.id === null ? 'Add' : 'Edit' }} Shortcut Group</VCardTitle>
-      <VCardText class="d-flex flex-column ga-3">
-        <VTextField v-model="groupForm.shortcode" label="Shortcode (e.g. wd)" density="compact" />
-        <VTextField v-model="groupForm.expansion" label="Expansion (full text)" density="compact" />
+      <VCardTitle class="pa-4">{{ groupForm.id === null ? 'Add' : 'Edit' }} Shortcut Group</VCardTitle>
+      <VCardText class="d-flex flex-column ga-3 pt-0">
+        <VTextField
+          ref="groupShortcodeRef"
+          v-model="groupForm.shortcode"
+          label="Shortcode (e.g. wd)"
+          density="compact"
+          autofocus
+          @keydown.enter.prevent="groupExpansionRef?.focus()"
+        />
+        <!-- Expansion is multiline — Enter adds a newline, not submits -->
+        <VTextField
+          ref="groupExpansionRef"
+          v-model="groupForm.expansion"
+          label="Expansion (full text)"
+          density="compact"
+        />
       </VCardText>
-      <div class="d-flex justify-end ga-2 pa-4">
+      <div class="d-flex justify-end ga-2 pa-4 pt-2">
         <VBtn variant="text" @click="groupDialog = false">Cancel</VBtn>
         <VBtn color="primary" @click="saveGroup">Save</VBtn>
       </div>
