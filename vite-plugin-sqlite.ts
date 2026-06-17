@@ -20,6 +20,31 @@ CREATE TABLE IF NOT EXISTS mapping_instance (
   name TEXT NOT NULL UNIQUE,
   expansion TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS form_history (
+  date      TEXT PRIMARY KEY,
+  bathe     TEXT,
+  wake      TEXT,
+  sleep     TEXT,
+  nap       TEXT,
+  worked    TEXT,
+  stress    TEXT,
+  tired     TEXT,
+  game      TEXT,
+  music     TEXT,
+  grateful  TEXT,
+  learn     TEXT,
+  exercise  TEXT,
+  remember  TEXT,
+  day_rating TEXT,
+  feeling   TEXT,
+  why       TEXT,
+  phase     TEXT,
+  time      TEXT,
+  happened  TEXT,
+  day_name  TEXT,
+  output    TEXT,
+  saved_at  TEXT
+);
 `
 
 const SUGGESTION_TYPES = `

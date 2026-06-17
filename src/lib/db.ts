@@ -132,3 +132,71 @@ export async function deleteMappingType(id: string): Promise<void> {
   await exec('DELETE FROM mapping_type WHERE id = ?', [id])
 }
 
+// ── Form history ──────────────────────────────────────────────────────────────
+
+export interface FormHistoryRow {
+  date: string
+  bathe: string
+  wake: string
+  sleep: string
+  nap: string
+  worked: string
+  stress: string
+  tired: string
+  game: string
+  music: string
+  grateful: string
+  learn: string
+  exercise: string
+  remember: string
+  day_rating: string
+  feeling: string
+  why: string
+  phase: string
+  time: string
+  happened: string
+  day_name: string
+  output: string
+  saved_at: string
+}
+
+export async function upsertFormHistory(row: FormHistoryRow): Promise<void> {
+  await exec(
+    `INSERT INTO form_history
+       (date, bathe, wake, sleep, nap, worked, stress, tired, game, music,
+        grateful, learn, exercise, remember, day_rating, feeling, why, phase,
+        time, happened, day_name, output, saved_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(date) DO UPDATE SET
+       bathe=excluded.bathe, wake=excluded.wake, sleep=excluded.sleep,
+       nap=excluded.nap, worked=excluded.worked, stress=excluded.stress,
+       tired=excluded.tired, game=excluded.game, music=excluded.music,
+       grateful=excluded.grateful, learn=excluded.learn, exercise=excluded.exercise,
+       remember=excluded.remember, day_rating=excluded.day_rating,
+       feeling=excluded.feeling, why=excluded.why, phase=excluded.phase,
+       time=excluded.time, happened=excluded.happened, day_name=excluded.day_name,
+       output=excluded.output, saved_at=excluded.saved_at`,
+    [
+      row.date, row.bathe, row.wake, row.sleep, row.nap, row.worked,
+      row.stress, row.tired, row.game, row.music, row.grateful, row.learn,
+      row.exercise, row.remember, row.day_rating, row.feeling, row.why,
+      row.phase, row.time, row.happened, row.day_name, row.output, row.saved_at,
+    ]
+  )
+}
+
+export async function getFormHistory(): Promise<FormHistoryRow[]> {
+  return toObjects(
+    await query(
+      `SELECT date, bathe, wake, sleep, nap, worked, stress, tired, game, music,
+              grateful, learn, exercise, remember, day_rating, feeling, why, phase,
+              time, happened, day_name, output, saved_at
+       FROM form_history ORDER BY date DESC`
+    )
+  )
+}
+
+export async function deleteFormHistoryRow(date: string): Promise<void> {
+  await exec('DELETE FROM form_history WHERE date = ?', [date])
+}
+

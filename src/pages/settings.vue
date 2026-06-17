@@ -9,8 +9,9 @@ import {
   getMappingInstances, insertMappingInstance, updateMappingInstance, deleteMappingInstance,
   getListValues, insertListValue, updateListValue, deleteListValue,
   getMappingTypes, insertMappingType, updateMappingType, deleteMappingType,
+  getFormHistory, deleteFormHistoryRow,
 } from '@/lib/db';
-import type { MappingInstance, ListValue, MappingType } from '@/lib/db';
+import type { MappingInstance, ListValue, MappingType, FormHistoryRow } from '@/lib/db';
 
 const router = useRouter();
 
@@ -267,6 +268,78 @@ const typeHeaders = [
   { title: 'Name', key: 'name' },
   { title: '', key: 'actions', sortable: false, align: 'end' as const, width: '48px' },
 ];
+
+// ── Form history ──────────────────────────────────────────────────────────────
+
+const FORM_STORAGE_KEY = 'daily_tracking_form_data';
+
+const history = ref<FormHistoryRow[]>([]);
+const historySearch = ref('');
+
+const loadHistory = async () => { history.value = await getFormHistory(); };
+
+// Load history when its tab is first activated
+watch(tab, (t) => { if (t === 'history' && !history.value.length) loadHistory(); });
+
+const historyHeaders = [
+  { title: 'Date', key: 'date', width: '120px' },
+  { title: 'Rating', key: 'day_rating', width: '80px' },
+  { title: 'Exercise', key: 'exercise', width: '160px' },
+  { title: 'Happened', key: 'happened' },
+  { title: '', key: 'actions', sortable: false, align: 'end' as const, width: '96px' },
+];
+
+const restoreToForm = (row: FormHistoryRow) => {
+  const formData = {
+    date:      row.date,
+    bathe:     row.bathe,
+    wake:      row.wake,
+    sleep:     row.sleep,
+    nap:       parseFloat(row.nap) || 0,
+    worked:    parseFloat(row.worked) || 0,
+    stress:    parseFloat(row.stress) || 0,
+    tired:     parseFloat(row.tired) || 0,
+    game:      row.game,
+    music:     row.music,
+    grateful:  row.grateful ? row.grateful.split(', ').filter(Boolean) : [],
+    learn:     row.learn ? row.learn.split(', ').filter(Boolean) : [],
+    exercise:  row.exercise,
+    remember:  parseFloat(row.remember) || 0,
+    dayRating: parseFloat(row.day_rating) || 0,
+    feeling:   parseInt(row.feeling) || 0,
+    why:       row.why,
+    phase:     row.phase ? row.phase.split(', ').filter(Boolean) : [],
+    time:      row.time,
+    happened:  row.happened,
+    dayName:   row.day_name,
+  };
+  localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData));
+  router.push('/');
+};
+
+const copyHistoryRow = async (row: FormHistoryRow) => {
+  if (!row.output) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(row.output);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = row.output;
+      Object.assign(ta.style, { position: 'fixed', left: '-999999px', top: '-999999px' });
+      document.body.appendChild(ta);
+      ta.focus(); ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    notify('Copied!');
+  } catch { notify('Copy failed'); }
+};
+
+const deleteHistory = async (date: string) => {
+  await deleteFormHistoryRow(date);
+  await loadHistory();
+  notify('Deleted');
+};
 </script>
 
 <template>
@@ -284,6 +357,7 @@ const typeHeaders = [
           <VTab value="mappings">Mappings</VTab>
           <VTab value="listValues">List Values</VTab>
           <VTab value="types">Types</VTab>
+          <VTab value="history" @click="loadHistory">History</VTab>
         </VTabs>
 
         <VCardText class="pa-2 pa-sm-3">
@@ -369,6 +443,40 @@ const typeHeaders = [
                 <template #bottom />
               </VDataTable>
             </VTabsWindowItem>
+
+          <!-- ── History ────────────────────────────────────────────────── -->
+          <VTabsWindowItem value="history">
+            <div class="d-flex align-center ga-2 mb-2">
+              <VTextField
+                v-model="historySearch"
+                density="compact" placeholder="Search…" prepend-inner-icon="mdi-magnify"
+                clearable hide-details class="flex-grow-1" style="max-width: 320px"
+              />
+            </div>
+            <VDataTable
+              :headers="historyHeaders"
+              :items="history"
+              :search="historySearch"
+              density="compact"
+              :items-per-page="-1"
+              hover
+              @click:row="(_: any, { item }: any) => restoreToForm(item)"
+              style="cursor: pointer"
+            >
+              <template #item.happened="{ item }">
+                <span :title="item.happened" style="display: block; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                  {{ item.happened }}
+                </span>
+              </template>
+              <template #item.actions="{ item }">
+                <div class="d-flex align-center" @click.stop>
+                  <VBtn icon="mdi-content-copy" size="x-small" variant="text" title="Copy output" @click="copyHistoryRow(item)" />
+                  <VBtn icon="mdi-delete" size="x-small" variant="text" color="error" title="Delete" @click="deleteHistory(item.date)" />
+                </div>
+              </template>
+              <template #bottom />
+            </VDataTable>
+          </VTabsWindowItem>
 
           </VTabsWindow>
         </VCardText>

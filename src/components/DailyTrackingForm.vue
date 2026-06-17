@@ -14,7 +14,7 @@ import TimeDisplay from '@/components/fields/TimeDisplay.vue';
 import AutocompleteField from '@/components/fields/AutocompleteField.vue';
 import AutocompleteListField from '@/components/fields/AutocompleteListField.vue';
 import { getTodayDate, getYesterdayDate } from '@/lib/fieldUtils';
-import { getMappingInstances, getListValues, getSuggestions } from '@/lib/db';
+import { getMappingInstances, getListValues, getSuggestions, upsertFormHistory } from '@/lib/db';
 import type { MappingInstance, ListValue } from '@/lib/db';
 
 const router = useRouter();
@@ -339,6 +339,35 @@ const copyToClipboard = async () => {
     }
     copySuccess.value = true;
     setTimeout(() => { copySuccess.value = false; }, 2000);
+
+    // Persist to history (fire-and-forget — don't block the copy UX)
+    if (formData.value.date) {
+      upsertFormHistory({
+        date:      formData.value.date,
+        bathe:     formData.value.bathe,
+        wake:      formData.value.wake,
+        sleep:     sleepTime,
+        nap:       String(formData.value.nap),
+        worked:    String(formData.value.worked),
+        stress:    String(formData.value.stress),
+        tired:     String(formData.value.tired),
+        game:      formData.value.game,
+        music:     formData.value.music,
+        grateful:  formData.value.grateful.join(', '),
+        learn:     formData.value.learn.join(', '),
+        exercise:  formData.value.exercise,
+        remember:  String(formData.value.remember),
+        day_rating: String(formData.value.dayRating),
+        feeling:   String(formData.value.feeling),
+        why:       formData.value.why,
+        phase:     formData.value.phase.join(', '),
+        time:      formData.value.time,
+        happened:  formData.value.happened,
+        day_name:  formData.value.dayName,
+        output:    text,
+        saved_at:  new Date().toISOString(),
+      }).catch(console.error);
+    }
   } catch (err) {
     console.error('Failed to copy:', err);
   }
