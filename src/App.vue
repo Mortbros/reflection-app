@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
-import { RouterView, useRouter } from 'vue-router';
-import { VApp, VMain, VBtn } from 'vuetify/components';
-
-const router = useRouter();
+import { RouterView } from 'vue-router';
+import { VApp, VMain } from 'vuetify/components';
 
 const onKeydown = (e: KeyboardEvent) => {
   const ctrl = e.ctrlKey || e.metaKey;
@@ -22,13 +20,6 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown));
     <VMain>
       <RouterView />
     </VMain>
-    <VBtn
-      icon="mdi-cog"
-      size="small"
-      variant="tonal"
-      style="position: fixed; top: 12px; right: 12px; z-index: 1000;"
-      @click="router.push(router.currentRoute.value.path === '/settings' ? '/' : '/settings')"
-    />
   </VApp>
 </template>
 

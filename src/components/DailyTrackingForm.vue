@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch, useTemplateRef } from 'vue';
+import { useRouter } from 'vue-router';
 import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip, VIcon } from 'vuetify/components';
 import DateField from '@/components/fields/DateField.vue';
 import YesNoField from '@/components/fields/YesNoField.vue';
@@ -15,6 +16,8 @@ import AutocompleteListField from '@/components/fields/AutocompleteListField.vue
 import { getTodayDate, getYesterdayDate } from '@/lib/fieldUtils';
 import { getMappingInstances, getListValues, getSuggestions } from '@/lib/db';
 import type { MappingInstance, ListValue } from '@/lib/db';
+
+const router = useRouter();
 
 const STORAGE_KEY = 'daily_tracking_form_data';
 
@@ -374,15 +377,18 @@ onMounted(async () => {
         <VCard variant="outlined" class="pa-6">
           <VCardText>
             <div class="d-flex flex-column ga-6">
-              <div class="d-flex justify-center flex-wrap ga-4 mb-4">
-                <VBtn :color="copySuccess ? 'success' : 'primary'" size="large" class="text-h6"
-                  @click="copyToClipboard" :prepend-icon="copySuccess ? 'mdi-check' : 'mdi-content-copy'">
-                  {{ copySuccess ? 'Copied!' : 'Copy to Clipboard' }}
-                </VBtn>
-                <VBtn ref="clearButtonRef" color="error" size="large" class="text-h6" prepend-icon="mdi-delete"
-                  @click="clearForm" @keydown="handleClearButtonKeydown">
-                  Clear
-                </VBtn>
+              <div class="d-flex align-center ga-4 mb-4">
+                <div class="d-flex justify-center flex-wrap ga-4 flex-grow-1">
+                  <VBtn :color="copySuccess ? 'success' : 'primary'" size="large" class="text-h6"
+                    @click="copyToClipboard" :prepend-icon="copySuccess ? 'mdi-check' : 'mdi-content-copy'">
+                    {{ copySuccess ? 'Copied!' : 'Copy to Clipboard' }}
+                  </VBtn>
+                  <VBtn ref="clearButtonRef" color="error" size="large" class="text-h6" prepend-icon="mdi-delete"
+                    @click="clearForm" @keydown="handleClearButtonKeydown">
+                    Clear
+                  </VBtn>
+                </div>
+                <VBtn icon="mdi-cog" variant="text" size="small" @click="router.push('/settings')" />
               </div>
 
               <div class="d-flex align-center ga-2">
