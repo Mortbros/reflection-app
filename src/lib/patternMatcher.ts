@@ -12,7 +12,7 @@ interface PatternSegment {
  * Parses a mapping key into segments.
  * Handles: literal text, /regex/flags, and <typeId> or <typeId,> slots.
  */
-export function parseKey(key: string): PatternSegment[] {
+function parseKey(key: string): PatternSegment[] {
   const segments: PatternSegment[] = []
   let i = 0
 
@@ -129,7 +129,7 @@ function resolveTypeChars(chars: string, values: ListValue[]): string[] {
   return results
 }
 
-export function matchPattern(
+function matchPattern(
   input: string,
   key: string,
   listValues: ListValue[],
@@ -173,7 +173,7 @@ export function matchPattern(
  * <typeId> → first matched value for that type
  * <typeId,> → all matched values comma-separated
  */
-export function expandValue(template: string, matchedNamesByType: Map<string, string[]>): string {
+function expandValue(template: string, matchedNamesByType: Map<string, string[]>): string {
   return template.replace(/<([a-zA-Z][a-zA-Z0-9]*)(,?)>/g, (_match, typeId, comma) => {
     const names = matchedNamesByType.get(typeId) ?? []
     if (names.length === 0) return ''

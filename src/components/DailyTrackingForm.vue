@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, watch, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
-import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip, VIcon } from 'vuetify/components';
+import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip } from 'vuetify/components';
 import DateField from '@/components/fields/DateField.vue';
 import YesNoField from '@/components/fields/YesNoField.vue';
 import TimeField from '@/components/fields/TimeField.vue';
