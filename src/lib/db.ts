@@ -19,11 +19,6 @@ export interface MappingType {
   name: string
 }
 
-export interface ShortcutGroup {
-  id: number
-  shortcode: string
-  expansion: string
-}
 
 // ── Transport ────────────────────────────────────────────────────────────────
 
@@ -137,20 +132,3 @@ export async function deleteMappingType(id: string): Promise<void> {
   await exec('DELETE FROM mapping_type WHERE id = ?', [id])
 }
 
-// ── Shortcut groups ──────────────────────────────────────────────────────────
-
-export async function getShortcutGroups(): Promise<ShortcutGroup[]> {
-  return toObjects(await query('SELECT id, shortcode, expansion FROM shortcut_group ORDER BY shortcode'))
-}
-
-export async function insertShortcutGroup(shortcode: string, expansion: string): Promise<void> {
-  await exec('INSERT INTO shortcut_group (shortcode, expansion) VALUES (?, ?)', [shortcode, expansion])
-}
-
-export async function updateShortcutGroup(id: number, shortcode: string, expansion: string): Promise<void> {
-  await exec('UPDATE shortcut_group SET shortcode = ?, expansion = ? WHERE id = ?', [shortcode, expansion, id])
-}
-
-export async function deleteShortcutGroup(id: number): Promise<void> {
-  await exec('DELETE FROM shortcut_group WHERE id = ?', [id])
-}

@@ -24,9 +24,3 @@ CREATE TABLE IF NOT EXISTS mapping_instance (
   name TEXT NOT NULL UNIQUE,
   expansion TEXT NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS shortcut_group (
-  id INTEGER PRIMARY KEY,
-  shortcode TEXT NOT NULL UNIQUE,
-  expansion TEXT NOT NULL
-);
