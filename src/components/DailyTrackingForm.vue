@@ -12,12 +12,8 @@ import PatternTextField from '@/components/fields/PatternTextField.vue';
 import TimeDisplay from '@/components/fields/TimeDisplay.vue';
 import AutocompleteField from '@/components/fields/AutocompleteField.vue';
 import AutocompleteListField from '@/components/fields/AutocompleteListField.vue';
-import { exerciseSuggestions } from '@/assets/exerciseSuggestions';
-import { musicSuggestions } from '@/assets/musicSuggestions';
-import { phaseSuggestions } from '@/assets/phaseSuggestions';
-import { gameSuggestions } from '@/assets/gameSuggestions';
 import { getTodayDate, getYesterdayDate } from '@/lib/fieldUtils';
-import { getMappingInstances, getListValues } from '@/lib/db';
+import { getMappingInstances, getListValues, getSuggestions } from '@/lib/db';
 import type { MappingInstance, ListValue } from '@/lib/db';
 
 const STORAGE_KEY = 'daily_tracking_form_data';
@@ -25,11 +21,28 @@ const STORAGE_KEY = 'daily_tracking_form_data';
 // DB state
 const dbMappings = ref<MappingInstance[]>([]);
 const dbListValues = ref<ListValue[]>([]);
+const dbExerciseSuggestions = ref<string[]>([]);
+const dbMusicSuggestions = ref<string[]>([]);
+const dbGameSuggestions = ref<string[]>([]);
+const dbPhaseSuggestions = ref<string[]>([]);
 const dbLoaded = ref(false);
 
 const loadDb = async () => {
-  dbMappings.value = await getMappingInstances();
-  dbListValues.value = await getListValues();
+  [
+    dbMappings.value,
+    dbListValues.value,
+    dbExerciseSuggestions.value,
+    dbMusicSuggestions.value,
+    dbGameSuggestions.value,
+    dbPhaseSuggestions.value,
+  ] = await Promise.all([
+    getMappingInstances(),
+    getListValues(true),   // pattern matching only — rows with abbreviation set
+    getSuggestions('exercise'),
+    getSuggestions('music'),
+    getSuggestions('game'),
+    getSuggestions('phase'),
+  ]);
   dbLoaded.value = true;
 };
 
@@ -417,11 +430,11 @@ onMounted(async () => {
                 </VCol>
               </VRow>
 
-              <AutocompleteField ref="gameRef" v-model="formData.game" label="Game" :suggestions="gameSuggestions"
+              <AutocompleteField ref="gameRef" v-model="formData.game" label="Game" :suggestions="dbGameSuggestions"
                 :required="false" :on-next="focusRules['game']" :on-previous="prevRules['game']" />
 
               <AutocompleteField ref="musicRef" v-model="formData.music" label="Music"
-                :suggestions="musicSuggestions" :required="true"
+                :suggestions="dbMusicSuggestions" :required="true"
                 :on-next="focusRules['music']" :on-previous="prevRules['music']" />
 
               <ListField ref="gratefulRef" v-model="formData.grateful" label="Grateful" :required="true"
@@ -431,7 +444,7 @@ onMounted(async () => {
                 :on-next="focusRules['learn']" :on-previous="prevRules['learn']" />
 
               <AutocompleteField ref="exerciseRef" v-model="formData.exercise" label="Exercise"
-                :suggestions="exerciseSuggestions" :required="true"
+                :suggestions="dbExerciseSuggestions" :required="true"
                 :on-next="focusRules['exercise']" :on-previous="prevRules['exercise']" />
 
               <FloatField ref="rememberRef" v-model="formData.remember" label="Remember" :max="10" :required="true"
@@ -447,7 +460,7 @@ onMounted(async () => {
                 :on-next="focusRules['why']" :on-previous="prevRules['why']" />
 
               <AutocompleteListField ref="phaseRef" v-model="formData.phase" label="Phase"
-                :suggestions="phaseSuggestions" :required="true" :auto-select="false"
+                :suggestions="dbPhaseSuggestions" :required="true" :auto-select="false"
                 :on-next="focusRules['phase']" :on-previous="prevRules['phase']" />
 
               <PatternTextField ref="happenedRef" v-model="formData.happened" label="Happened" :required="true"

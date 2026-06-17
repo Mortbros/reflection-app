@@ -3,11 +3,20 @@ CREATE TABLE IF NOT EXISTS mapping_type (
   name TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS list_value (
+-- Seeded suggestion types (pattern-matchable via <exercise>, <game>, etc.)
+INSERT OR IGNORE INTO mapping_type (id, name) VALUES
+  ('exercise', 'Exercise'),
+  ('game',     'Game'),
+  ('music',    'Music'),
+  ('phase',    'Phase');
+
+CREATE TABLE IF NOT EXISTS list_values (
   id INTEGER PRIMARY KEY,
-  abbreviation TEXT NOT NULL,
   value TEXT NOT NULL,
-  type_id TEXT NOT NULL
+  type_id TEXT NOT NULL,
+  abbreviation TEXT,             -- NULL = autocomplete only; set = also usable in patterns
+  UNIQUE(value, type_id),
+  UNIQUE(abbreviation, type_id)  -- NULLs are distinct in SQLite, so multiple NULL abbrevs allowed
 );
 
 CREATE TABLE IF NOT EXISTS mapping_instance (
@@ -20,11 +29,4 @@ CREATE TABLE IF NOT EXISTS shortcut_group (
   id INTEGER PRIMARY KEY,
   shortcode TEXT NOT NULL UNIQUE,
   expansion TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS suggestion (
-  id INTEGER PRIMARY KEY,
-  field TEXT NOT NULL,
-  value TEXT NOT NULL,
-  UNIQUE(field, value)
 );

@@ -7,11 +7,13 @@ CREATE TABLE IF NOT EXISTS mapping_type (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS list_value (
+CREATE TABLE IF NOT EXISTS list_values (
   id INTEGER PRIMARY KEY,
-  abbreviation TEXT NOT NULL,
   value TEXT NOT NULL,
-  type_id TEXT NOT NULL
+  type_id TEXT NOT NULL,
+  abbreviation TEXT,
+  UNIQUE(value, type_id),
+  UNIQUE(abbreviation, type_id)
 );
 CREATE TABLE IF NOT EXISTS mapping_instance (
   id INTEGER PRIMARY KEY,
@@ -23,13 +25,41 @@ CREATE TABLE IF NOT EXISTS shortcut_group (
   shortcode TEXT NOT NULL UNIQUE,
   expansion TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS suggestion (
-  id INTEGER PRIMARY KEY,
-  field TEXT NOT NULL,
-  value TEXT NOT NULL,
-  UNIQUE(field, value)
-);
 `
+
+const SUGGESTION_TYPES = `
+INSERT OR IGNORE INTO mapping_type (id, name) VALUES
+  ('exercise', 'Exercise'),
+  ('game', 'Game'),
+  ('music', 'Music'),
+  ('phase', 'Phase');
+`
+
+/** Migrate data from old list_value / suggestion tables if they still exist. */
+function migrateOldTables(db: import('sql.js').Database) {
+  const tableNames: string[] = (db.exec(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name IN ('list_value','suggestion')`
+  )[0]?.values ?? []).map((r) => r[0] as string)
+
+  if (tableNames.length === 0) return
+
+  db.run(SUGGESTION_TYPES)
+
+  if (tableNames.includes('list_value')) {
+    // Deduplicate via UNIQUE constraints — INSERT OR IGNORE keeps first occurrence
+    db.run(`INSERT OR IGNORE INTO list_values (value, type_id, abbreviation)
+            SELECT value, type_id, abbreviation FROM list_value`)
+    db.run(`DROP TABLE list_value`)
+    console.log('[sqlite] migrated list_value → list_values')
+  }
+
+  if (tableNames.includes('suggestion')) {
+    db.run(`INSERT OR IGNORE INTO list_values (value, type_id, abbreviation)
+            SELECT value, field, NULL FROM suggestion`)
+    db.run(`DROP TABLE suggestion`)
+    console.log('[sqlite] migrated suggestion → list_values')
+  }
+}
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
@@ -61,6 +91,8 @@ export function sqlitePlugin(dbPath: string): Plugin {
     }
 
     db.run(SCHEMA)
+    db.run(SUGGESTION_TYPES)
+    migrateOldTables(db)
     flush()
     console.log(`[sqlite] using ${dbPath}`)
   }

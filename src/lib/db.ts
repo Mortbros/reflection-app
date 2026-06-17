@@ -9,9 +9,9 @@ export interface MappingInstance {
 
 export interface ListValue {
   id: number
-  abbreviation: string
   value: string
   type_id: string
+  abbreviation: string | null  // null = autocomplete-only; set = also usable in pattern matching
 }
 
 export interface MappingType {
@@ -85,27 +85,38 @@ export async function deleteMappingInstance(id: number): Promise<void> {
 
 // ── List values ──────────────────────────────────────────────────────────────
 
-export async function getListValues(typeId?: string): Promise<ListValue[]> {
-  if (typeId) {
-    return toObjects(
-      await query('SELECT id, abbreviation, value, type_id FROM list_value WHERE type_id = ? ORDER BY abbreviation', [typeId])
-    )
-  }
-  return toObjects(
-    await query('SELECT id, abbreviation, value, type_id FROM list_value ORDER BY type_id, abbreviation')
+/** Returns all list_values rows. Pass forPatternMatching=true to exclude rows with null abbreviation. */
+export async function getListValues(forPatternMatching = false): Promise<ListValue[]> {
+  const sql = forPatternMatching
+    ? 'SELECT id, value, type_id, abbreviation FROM list_values WHERE abbreviation IS NOT NULL ORDER BY type_id, abbreviation'
+    : 'SELECT id, value, type_id, abbreviation FROM list_values ORDER BY type_id, value'
+  return toObjects(await query(sql))
+}
+
+/** Returns display values for autocomplete — all values for the given type. */
+export async function getSuggestions(typeId: string): Promise<string[]> {
+  const rows = toObjects<{ value: string }>(
+    await query('SELECT value FROM list_values WHERE type_id = ? ORDER BY value', [typeId])
+  )
+  return rows.map((r) => r.value)
+}
+
+export async function insertListValue(value: string, typeId: string, abbreviation?: string): Promise<void> {
+  await exec(
+    'INSERT INTO list_values (value, type_id, abbreviation) VALUES (?, ?, ?)',
+    [value, typeId, abbreviation ?? null]
   )
 }
 
-export async function insertListValue(abbreviation: string, value: string, typeId: string): Promise<void> {
-  await exec('INSERT INTO list_value (abbreviation, value, type_id) VALUES (?, ?, ?)', [abbreviation, value, typeId])
-}
-
-export async function updateListValue(id: number, abbreviation: string, value: string, typeId: string): Promise<void> {
-  await exec('UPDATE list_value SET abbreviation = ?, value = ?, type_id = ? WHERE id = ?', [abbreviation, value, typeId, id])
+export async function updateListValue(id: number, value: string, typeId: string, abbreviation?: string): Promise<void> {
+  await exec(
+    'UPDATE list_values SET value = ?, type_id = ?, abbreviation = ? WHERE id = ?',
+    [value, typeId, abbreviation ?? null, id]
+  )
 }
 
 export async function deleteListValue(id: number): Promise<void> {
-  await exec('DELETE FROM list_value WHERE id = ?', [id])
+  await exec('DELETE FROM list_values WHERE id = ?', [id])
 }
 
 // ── Mapping types ────────────────────────────────────────────────────────────

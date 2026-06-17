@@ -89,10 +89,10 @@ function buildMatchingPattern(
         captureIdx++
       }
     } else if (seg.type === 'typeSlot' && seg.typeId) {
-      const vals = listValuesByType.get(seg.typeId) ?? []
+      const vals = (listValuesByType.get(seg.typeId) ?? []).filter(v => v.abbreviation !== null)
       const sortedKeys = [...vals]
-        .sort((a, b) => b.abbreviation.length - a.abbreviation.length)
-        .map(v => v.abbreviation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .sort((a, b) => b.abbreviation!.length - a.abbreviation!.length)
+        .map(v => v.abbreviation!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
 
       const altPattern = sortedKeys.length ? sortedKeys.join('|') : '[^\\s]+'
       const capPattern = seg.multiple
@@ -110,15 +110,17 @@ function buildMatchingPattern(
 }
 
 function resolveTypeChars(chars: string, values: ListValue[]): string[] {
-  const sorted = [...values].sort((a, b) => b.abbreviation.length - a.abbreviation.length)
+  const sorted = [...values]
+    .filter(v => v.abbreviation !== null)
+    .sort((a, b) => b.abbreviation!.length - a.abbreviation!.length)
   const results: string[] = []
   let remaining = chars
 
   while (remaining.length > 0) {
-    const match = sorted.find(v => remaining.startsWith(v.abbreviation))
+    const match = sorted.find(v => remaining.startsWith(v.abbreviation!))
     if (match) {
       results.push(match.value)
-      remaining = remaining.slice(match.abbreviation.length)
+      remaining = remaining.slice(match.abbreviation!.length)
     } else {
       remaining = remaining.slice(1)
     }

@@ -200,11 +200,12 @@ const openEditListValue = (row: ListValue) => {
 
 const saveListValue = async () => {
   const { id, abbreviation, value, type_id } = listValueForm.value;
-  if (!abbreviation.trim() || !value.trim() || abbrevTaken.value) return;
+  if (!value.trim() || abbrevTaken.value) return;
+  const abbrev = abbreviation.trim() || undefined;
   if (id === null) {
-    await insertListValue(abbreviation.trim(), value.trim(), type_id.trim());
+    await insertListValue(value.trim(), type_id.trim(), abbrev);
   } else {
-    await updateListValue(id, abbreviation.trim(), value.trim(), type_id.trim());
+    await updateListValue(id, value.trim(), type_id.trim(), abbrev);
   }
   listValueDialog.value = false;
   await refresh();
@@ -502,7 +503,7 @@ const groupHeaders = [
       </VCardText>
       <div class="d-flex justify-end ga-2 pa-4 pt-2">
         <VBtn variant="text" @click="listValueDialog = false">Cancel</VBtn>
-        <VBtn color="primary" :disabled="abbrevTaken || !listValueForm.abbreviation || !listValueForm.value" @click="saveListValue">Save</VBtn>
+        <VBtn color="primary" :disabled="abbrevTaken || !listValueForm.value" @click="saveListValue">Save</VBtn>
       </div>
     </VCard>
   </VDialog>
