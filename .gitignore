@@ -38,3 +38,4 @@ __screenshots__/
 # mortbros.net
 /src/assets/*
 /public/mappings.db
+/mappings.db
