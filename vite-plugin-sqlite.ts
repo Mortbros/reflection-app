@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS list_values (
 CREATE TABLE IF NOT EXISTS mapping_instance (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
-  expansion TEXT NOT NULL
+  expansion TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS form_history (
   date      TEXT PRIMARY KEY,
@@ -86,6 +87,8 @@ export function sqlitePlugin(dbPath: string): Plugin {
 
     db.run(SCHEMA)
     db.run(SUGGESTION_TYPES)
+    // Add enabled column to existing DBs that predate the schema change
+    try { db.run('ALTER TABLE mapping_instance ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1') } catch {}
     flush()
     console.log(`[sqlite] using ${dbPath}`)
   }

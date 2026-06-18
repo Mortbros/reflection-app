@@ -39,7 +39,7 @@ const loadDb = async () => {
     dbGameSuggestions.value,
     dbPhaseSuggestions.value,
   ] = await Promise.all([
-    getMappingInstances(),
+    getMappingInstances(true),   // only enabled mappings
     getListValues(true),   // pattern matching only — rows with abbreviation set
     getSuggestions('exercise'),
     getSuggestions('music'),

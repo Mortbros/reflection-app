@@ -129,15 +129,21 @@ function resolveTypeChars(chars: string, values: ListValue[]): string[] {
   return results
 }
 
+interface MatchedSlot {
+  typeId: string
+  multiple: boolean
+  names: string[]
+}
+
 function matchPattern(
   input: string,
   key: string,
   listValues: ListValue[],
-): { matched: boolean; matchedNamesByType: Map<string, string[]> } {
+): { matched: boolean; matchedSlots: MatchedSlot[] } {
   const segments = parseKey(key)
   const hasSlot = segments.some(s => s.type === 'typeSlot')
 
-  if (!hasSlot) return { matched: false, matchedNamesByType: new Map() }
+  if (!hasSlot) return { matched: false, matchedSlots: [] }
 
   const byType = new Map<string, ListValue[]>()
   for (const v of listValues) {
@@ -148,36 +154,47 @@ function matchPattern(
 
   const { pattern, slotIndices } = buildMatchingPattern(segments, byType)
   const match = input.match(pattern)
-  if (!match) return { matched: false, matchedNamesByType: new Map() }
+  if (!match) return { matched: false, matchedSlots: [] }
 
-  const matchedNamesByType = new Map<string, string[]>()
-  for (const { captureIdx, typeId } of slotIndices) {
+  // Build ordered slot results — one entry per slot in pattern order.
+  // Using an array (not a map) so duplicate type IDs are preserved separately.
+  const matchedSlots: MatchedSlot[] = []
+  for (const { captureIdx, typeId, multiple } of slotIndices) {
     const chars = match[captureIdx]
-    if (chars) {
-      const vals = byType.get(typeId) ?? []
-      const names = resolveTypeChars(chars, vals)
-      if (names.length > 0) {
-        matchedNamesByType.set(typeId, names)
-      }
-    }
+    const vals = byType.get(typeId) ?? []
+    const names = chars ? resolveTypeChars(chars, vals) : []
+    matchedSlots.push({ typeId, multiple, names })
   }
 
-  if (matchedNamesByType.size > 0) {
-    return { matched: true, matchedNamesByType }
+  if (matchedSlots.some(s => s.names.length > 0)) {
+    return { matched: true, matchedSlots }
   }
-  return { matched: false, matchedNamesByType: new Map() }
+  return { matched: false, matchedSlots: [] }
 }
 
 /**
  * Expands a template string by replacing <typeId> and <typeId,> with matched values.
- * <typeId> → first matched value for that type
- * <typeId,> → all matched values comma-separated
+ * When the same type appears multiple times, occurrences are consumed left-to-right
+ * against the ordered slot results from matchPattern — so <p><t><p,> expands correctly
+ * even when both <p> slots captured different values.
  */
-function expandValue(template: string, matchedNamesByType: Map<string, string[]>): string {
+function expandValue(template: string, matchedSlots: MatchedSlot[]): string {
+  const consumed = new Map<string, number>()
   return template.replace(/<([a-zA-Z][a-zA-Z0-9]*)(,?)>/g, (_match, typeId, comma) => {
-    const names = matchedNamesByType.get(typeId) ?? []
-    if (names.length === 0) return ''
-    return comma === ',' || names.length > 1 ? names.join(', ') : (names[0] ?? '')
+    const count = consumed.get(typeId) ?? 0
+    consumed.set(typeId, count + 1)
+    let seen = 0
+    for (const slot of matchedSlots) {
+      if (slot.typeId === typeId) {
+        if (seen === count) {
+          const { names } = slot
+          if (names.length === 0) return ''
+          return comma === ',' || names.length > 1 ? names.join(', ') : (names[0] ?? '')
+        }
+        seen++
+      }
+    }
+    return ''
   })
 }
 
@@ -198,7 +215,7 @@ export function expandToken(
     if (hasSlot) {
       const result = matchPattern(token, key, listValues)
       if (result.matched) {
-        return expandValue(rule.expansion, result.matchedNamesByType)
+        return expandValue(rule.expansion, result.matchedSlots)
       }
       continue
     }

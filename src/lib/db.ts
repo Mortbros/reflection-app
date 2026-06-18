@@ -5,6 +5,7 @@ export interface MappingInstance {
   id: number
   name: string
   expansion: string
+  enabled: boolean
 }
 
 export interface ListValue {
@@ -54,10 +55,14 @@ function toObjects<T>(results: SqlJsResult): T[] {
 
 // ── Mapping instances ────────────────────────────────────────────────────────
 
-export async function getMappingInstances(): Promise<MappingInstance[]> {
-  return toObjects(
-    await query('SELECT id, name, expansion FROM mapping_instance ORDER BY name')
+export async function getMappingInstances(onlyEnabled = false): Promise<MappingInstance[]> {
+  const sql = onlyEnabled
+    ? 'SELECT id, name, expansion, enabled FROM mapping_instance WHERE enabled = 1 ORDER BY name'
+    : 'SELECT id, name, expansion, enabled FROM mapping_instance ORDER BY name'
+  const rows = toObjects<{ id: number; name: string; expansion: string; enabled: number }>(
+    await query(sql)
   )
+  return rows.map(r => ({ ...r, enabled: r.enabled !== 0 }))
 }
 
 export async function insertMappingInstance(name: string, expansion: string): Promise<void> {
@@ -76,6 +81,23 @@ export async function updateMappingInstance(id: number, name: string, expansion:
 
 export async function deleteMappingInstance(id: number): Promise<void> {
   await exec('DELETE FROM mapping_instance WHERE id = ?', [id])
+}
+
+export async function setMappingInstanceEnabled(id: number, enabled: boolean): Promise<void> {
+  await exec('UPDATE mapping_instance SET enabled = ? WHERE id = ?', [enabled ? 1 : 0, id])
+}
+
+// INSERT OR IGNORE variants used for CSV import (silently skip duplicates)
+export async function importMappingInstance(name: string, expansion: string): Promise<void> {
+  await exec('INSERT OR IGNORE INTO mapping_instance (name, expansion) VALUES (?, ?)', [name, expansion])
+}
+
+export async function importListValue(value: string, typeId: string, abbreviation?: string): Promise<void> {
+  await exec('INSERT OR IGNORE INTO list_values (value, type_id, abbreviation) VALUES (?, ?, ?)', [value, typeId, abbreviation ?? null])
+}
+
+export async function importMappingType(id: string, name: string): Promise<void> {
+  await exec('INSERT OR IGNORE INTO mapping_type (id, name) VALUES (?, ?)', [id, name])
 }
 
 // ── List values ──────────────────────────────────────────────────────────────
@@ -130,6 +152,41 @@ export async function updateMappingType(id: string, name: string): Promise<void>
 
 export async function deleteMappingType(id: string): Promise<void> {
   await exec('DELETE FROM mapping_type WHERE id = ?', [id])
+}
+
+export async function countMappingsUsingType(typeId: string): Promise<number> {
+  const slot = `%<${typeId}>%`
+  const slotMultiple = `%<${typeId},>%`
+  const rows = toObjects<{ count: number }>(
+    await query(
+      `SELECT COUNT(*) as count FROM mapping_instance
+       WHERE name LIKE ? OR name LIKE ? OR expansion LIKE ? OR expansion LIKE ?`,
+      [slot, slotMultiple, slot, slotMultiple]
+    )
+  )
+  return rows[0]?.count ?? 0
+}
+
+export async function renameMappingTypeId(
+  oldId: string,
+  newId: string,
+  updateMappings: boolean,
+): Promise<void> {
+  await exec('UPDATE mapping_type SET id = ? WHERE id = ?', [newId, oldId])
+  await exec('UPDATE list_values SET type_id = ? WHERE type_id = ?', [newId, oldId])
+  if (updateMappings) {
+    const oldSlot = `<${oldId}>`
+    const oldSlotMultiple = `<${oldId},>`
+    const newSlot = `<${newId}>`
+    const newSlotMultiple = `<${newId},>`
+    await exec(
+      `UPDATE mapping_instance SET
+         name = REPLACE(REPLACE(name, ?, ?), ?, ?),
+         expansion = REPLACE(REPLACE(expansion, ?, ?), ?, ?)`,
+      [oldSlotMultiple, newSlotMultiple, oldSlot, newSlot,
+       oldSlotMultiple, newSlotMultiple, oldSlot, newSlot]
+    )
+  }
 }
 
 // ── Form history ──────────────────────────────────────────────────────────────

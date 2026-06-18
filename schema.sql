@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS list_values (
 CREATE TABLE IF NOT EXISTS mapping_instance (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
-  expansion TEXT NOT NULL
+  expansion TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1   -- 0 = disabled (skipped by pattern matcher)
 );
 
 CREATE TABLE IF NOT EXISTS form_history (
