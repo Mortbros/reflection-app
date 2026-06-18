@@ -412,9 +412,11 @@ onUnmounted(() => document.removeEventListener('app:copy', onAppCopy));
 
 onMounted(async () => {
   loadFormData();
-  await loadDb();
   await nextTick();
   formRefs.bathe.value?.focus();
+  // loadDb runs after initial focus so the async wait doesn't steal focus
+  // back to bathe mid-session when the user has already moved to another field
+  await loadDb();
 });
 </script>
 

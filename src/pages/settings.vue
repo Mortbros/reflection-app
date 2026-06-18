@@ -624,17 +624,63 @@ const ignoreConflict = (input: string) => { ignoredConflicts.value = new Set([..
 const restoreConflict = (input: string) => { const s = new Set(ignoredConflicts.value); s.delete(input); ignoredConflicts.value = s; };
 const conflictsLoaded = ref(false);
 
+/**
+ * Enumerates all concrete tokens that a pattern mapping name could match,
+ * by substituting each type slot with every enabled list value abbreviation.
+ * Treats <typeId,> (multiple) the same as <typeId> (single) for conflict purposes —
+ * if a single-value expansion already conflicts, that is sufficient evidence.
+ * Returns at most `cap` tokens to bound runtime on large datasets.
+ */
+const generatePatternTokens = (patternName: string, lvList: ListValue[], cap = 2000): string[] => {
+  let candidates = [''];
+  let remaining = patternName;
+
+  while (remaining.length > 0) {
+    const slotMatch = remaining.match(/^(.*?)<(\w+),?>(.*)/s);
+    if (!slotMatch) {
+      // Only literal text left — append to all candidates
+      candidates = candidates.map(c => c + remaining);
+      break;
+    }
+    const [, literalBefore, typeId, afterSlot] = slotMatch;
+    const typeValues = lvList.filter(lv => lv.type_id === typeId && lv.enabled && lv.abbreviation);
+    if (typeValues.length === 0) return []; // unresolvable slot
+
+    const next: string[] = [];
+    for (const prefix of candidates) {
+      for (const lv of typeValues) {
+        next.push(prefix + literalBefore + lv.abbreviation!);
+        if (next.length >= cap) return next;
+      }
+    }
+    candidates = next;
+    remaining = afterSlot;
+  }
+  return candidates;
+};
+
 const computeConflicts = () => {
-  // For each literal (non-pattern, non-regex) mapping, find every other mapping that also matches it
-  const literalMappings = mappings.value.filter(
-    m => !m.name.includes('<') && !(m.name.startsWith('/') && m.name.lastIndexOf('/') > 0)
-  );
-  const allListValues = listValues.value.filter(v => v.enabled);
+  const allListValues = listValues.value.filter(v => v.enabled && v.abbreviation);
+  const enabledMappings = mappings.value.filter(m => m.enabled);
   const found: Conflict[] = [];
-  for (const lit of literalMappings) {
-    const matches = findAllMatches(lit.name, mappings.value, allListValues);
-    if (matches.length > 1) {
-      found.push({ input: lit.name, matches });
+  const checkedTokens = new Set<string>();
+
+  for (const m of enabledMappings) {
+    const isLiteral = !m.name.includes('<') && !(m.name.startsWith('/') && m.name.lastIndexOf('/') > 0);
+    const isPattern = m.name.includes('<');
+    const tokens = isLiteral
+      ? [m.name]
+      : isPattern
+        ? generatePatternTokens(m.name, allListValues)
+        : []; // regex — skip enumeration
+
+    for (const token of tokens) {
+      if (checkedTokens.has(token)) continue;
+      checkedTokens.add(token);
+      const matches = findAllMatches(token, enabledMappings, allListValues);
+      if (matches.length > 1) {
+        found.push({ input: token, matches });
+      }
     }
   }
   conflicts.value = found;
@@ -823,7 +869,7 @@ watch(tab, async (t) => {
               </div>
 
               <div v-if="conflicts.length === 0 && conflictsLoaded" class="text-body-2 text-medium-emphasis pa-2">
-                No literal mappings are shadowed by pattern or regex mappings.
+                No conflicts found — no two mappings match the same input.
               </div>
 
               <div v-for="conflict in conflicts" :key="conflict.input" class="mb-2">
