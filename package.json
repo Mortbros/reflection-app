@@ -16,6 +16,7 @@
   "dependencies": {
     "@mdi/font": "^7.4.47",
     "sql.js": "^1.14.1",
+    "textarea-caret": "^3.1.0",
     "vue": "^3.5.25",
     "vue-router": "^5.1.0",
     "vuetify": "^3.11.6"
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@tsconfig/node24": "^24.0.3",
     "@types/node": "^24.10.1",
+    "@types/textarea-caret": "^3.0.4",
     "@vitejs/plugin-vue": "^6.0.2",
     "@vue/tsconfig": "^0.8.1",
     "npm-run-all2": "^8.0.4",

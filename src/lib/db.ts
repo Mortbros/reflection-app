@@ -278,36 +278,42 @@ export async function recordTokenUsage(
     'INSERT INTO token_usage (raw_input, mapping_name, expansion, used_at) VALUES (?, ?, ?, ?)',
     [rawInput, mappingName, expansion, new Date().toISOString()]
   )
-  // Prune oldest rows when over the configured limit
-  await exec(
-    `DELETE FROM token_usage WHERE id IN (
-       SELECT id FROM token_usage ORDER BY used_at ASC
-       LIMIT MAX(0, (SELECT COUNT(*) FROM token_usage) - (
-         SELECT CAST(value AS INTEGER) FROM app_settings WHERE key = 'token_usage_max_rows'
-       ))
-     )`
+  // Prune oldest rows only when a positive limit is configured (0 or missing = unlimited)
+  const limitRows = toObjects<{ value: string }>(
+    await query("SELECT value FROM app_settings WHERE key = 'token_usage_max_rows'")
   )
+  const maxRows = parseInt(limitRows[0]?.value ?? '0') || 0
+  if (maxRows > 0) {
+    await exec(
+      `DELETE FROM token_usage WHERE id IN (
+         SELECT id FROM token_usage ORDER BY used_at ASC
+         LIMIT MAX(0, (SELECT COUNT(*) FROM token_usage) - ?)
+       )`,
+      [maxRows]
+    )
+  }
 }
 
-/** Returns recent token_usage rows whose raw_input starts with the given prefix. */
+/**
+ * Returns recent token_usage rows where raw_input OR expansion starts with the given prefix.
+ * Used to build frecency suggestions — both "you typed X before" and "X expanded to Y" are relevant.
+ */
 export async function getTokenUsageForPrefix(prefix: string, windowDays: number): Promise<TokenUsageRow[]> {
   return toObjects(await query(
     `SELECT raw_input, mapping_name, expansion, used_at FROM token_usage
-     WHERE raw_input LIKE ? AND used_at > datetime('now', ?)
+     WHERE (raw_input LIKE ? OR expansion LIKE ?)
+       AND used_at > datetime('now', ?)
      ORDER BY used_at DESC LIMIT 500`,
-    [prefix + '%', `-${windowDays} days`]
+    [prefix + '%', prefix + '%', `-${windowDays} days`]
   ))
 }
 
-/** Unmapped tokens (mapping_name IS NULL) that exceed the frequency threshold. */
-export async function getUnmappedFrequent(threshold: number, minLength: number): Promise<{ raw_input: string; count: number }[]> {
-  return toObjects(await query(
-    `SELECT raw_input, COUNT(*) as count FROM token_usage
-     WHERE mapping_name IS NULL AND LENGTH(raw_input) >= ?
-     GROUP BY raw_input HAVING count >= ?
-     ORDER BY count DESC`,
-    [minLength, threshold]
-  ))
+/** Fetches all non-empty 'happened' strings from form_history for offline analysis. */
+export async function getFormHistoryHappenedTexts(): Promise<string[]> {
+  const rows = toObjects<{ happened: string }>(
+    await query("SELECT happened FROM form_history WHERE happened IS NOT NULL AND happened != ''")
+  )
+  return rows.map(r => r.happened).filter(Boolean)
 }
 
 // ── App settings ──────────────────────────────────────────────────────────────

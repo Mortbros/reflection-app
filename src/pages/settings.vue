@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router';
 import {
   VContainer, VCard, VCardText, VTabs, VTab, VTabsWindow, VTabsWindowItem,
   VDataTable, VBtn, VDialog, VTextField, VCheckbox, VSelect, VSnackbar, VAlert, VFileInput,
-  VChip, VDivider,
+  VChip, VDivider, VProgressLinear,
 } from 'vuetify/components';
 import {
   getMappingInstances, insertMappingInstance, updateMappingInstance, deleteMappingInstance,
@@ -13,10 +13,10 @@ import {
   getMappingTypes, insertMappingType, updateMappingType, deleteMappingType,
   countMappingsUsingType, renameMappingTypeId,
   getFormHistory, deleteFormHistoryRow,
-  getUnmappedFrequent, getAllAppSettings, setAppSetting,
+  getFormHistoryHappenedTexts, getAllAppSettings, setAppSetting,
 } from '@/lib/db';
 import type { MappingInstance, ListValue, MappingType, FormHistoryRow } from '@/lib/db';
-import { findAllMatches } from '@/lib/patternMatcher';
+import { findAllMatches, expandToken } from '@/lib/patternMatcher';
 
 type Focusable = { focus(): void }
 
@@ -34,17 +34,26 @@ const tab = ref('mappings');
 const snackbar = ref(false);
 const snackbarText = ref('');
 
+// ── Global loading indicator ───────────────────────────────────────────────────
+const loadingCount = ref(0);
+const loading = computed(() => loadingCount.value > 0);
+async function withLoading<T>(fn: () => Promise<T>): Promise<T> {
+  loadingCount.value++;
+  try { return await fn(); }
+  finally { loadingCount.value--; }
+}
+
 const mappings = ref<MappingInstance[]>([]);
 const listValues = ref<ListValue[]>([]);
 const mappingTypes = ref<MappingType[]>([]);
 
-const refresh = async () => {
+const refresh = () => withLoading(async () => {
   [mappings.value, listValues.value, mappingTypes.value] = await Promise.all([
     getMappingInstances(),
     getListValues(),
     getMappingTypes(),
   ]);
-};
+});
 
 const notify = (msg: string) => { snackbarText.value = msg; snackbar.value = true; };
 
@@ -473,7 +482,7 @@ const FORM_STORAGE_KEY = 'daily_tracking_form_data';
 const history = ref<FormHistoryRow[]>([]);
 const historySearch = ref('');
 
-const loadHistory = async () => { history.value = await getFormHistory(); };
+const loadHistory = async () => { history.value = await withLoading(getFormHistory); };
 
 // Load history when its tab is first activated
 watch(tab, (t) => { if (t === 'history' && !history.value.length) loadHistory(); });
@@ -544,12 +553,33 @@ const suggestions = ref<{ raw_input: string; count: number }[]>([]);
 const suggestionsLoaded = ref(false);
 
 const appSettings = ref<Record<string, string>>({});
-const loadAppSettings = async () => { appSettings.value = await getAllAppSettings(); };
+const loadAppSettings = async () => {
+  appSettings.value = await withLoading(getAllAppSettings);
+};
 
+/**
+ * Analyses form_history.happened to find tokens that never matched a mapping.
+ * Runs in the background — does not block the UI.
+ */
 const loadSuggestions = async () => {
   const threshold = parseInt(appSettings.value.suggestion_threshold ?? '3') || 3;
   const minLen = parseInt(appSettings.value.suggestion_min_length ?? '4') || 4;
-  suggestions.value = await getUnmappedFrequent(threshold, minLen);
+  const happened = await withLoading(getFormHistoryHappenedTexts);
+  const enabledMappings = mappings.value.filter(m => m.enabled);
+  const enabledListValues = listValues.value.filter(v => v.enabled);
+  const counts = new Map<string, number>();
+  for (const text of happened) {
+    for (const token of text.split(/\s+/)) {
+      if (token.length < minLen) continue;
+      if (expandToken(token, enabledMappings, enabledListValues) === null) {
+        counts.set(token, (counts.get(token) ?? 0) + 1);
+      }
+    }
+  }
+  suggestions.value = [...counts.entries()]
+    .filter(([, c]) => c >= threshold)
+    .map(([raw_input, count]) => ({ raw_input, count }))
+    .sort((a, b) => b.count - a.count);
   suggestionsLoaded.value = true;
 };
 
@@ -563,7 +593,7 @@ const settingKeys = [
 ] as const;
 
 const saveSetting = async (key: string, value: string) => {
-  await setAppSetting(key, value);
+  await withLoading(() => setAppSetting(key, value));
   appSettings.value = { ...appSettings.value, [key]: value };
 };
 
@@ -653,11 +683,13 @@ watch(tab, async (t) => {
       </div>
 
       <VCard variant="outlined">
+        <VProgressLinear v-if="loading" indeterminate color="primary" height="2" />
         <VTabs v-model="tab">
           <VTab value="mappings">Mappings</VTab>
           <VTab value="listValues">List Values</VTab>
           <VTab value="types">Types</VTab>
           <VTab value="history" @click="loadHistory">History</VTab>
+          <div class="align-self-center mx-1" style="width:1px; height:20px; background: rgba(var(--v-border-color), var(--v-border-opacity))" />
           <VTab value="conflicts">Conflicts</VTab>
           <VTab value="test">Test</VTab>
           <VTab value="suggestions">Suggestions</VTab>
