@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS list_values (
   value TEXT NOT NULL,
   type_id TEXT NOT NULL,
   abbreviation TEXT,             -- NULL = autocomplete only; set = also usable in patterns
+  enabled INTEGER NOT NULL DEFAULT 1,
   UNIQUE(value, type_id),
   UNIQUE(abbreviation, type_id)  -- NULLs are distinct in SQLite, so multiple NULL abbrevs allowed
 );

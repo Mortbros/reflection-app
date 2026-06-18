@@ -199,6 +199,44 @@ function expandValue(template: string, matchedSlots: MatchedSlot[]): string {
 }
 
 /**
+ * Returns every mapping that matches the given token, along with its expansion.
+ * Used for conflict detection and the test/debugger tab.
+ */
+export function findAllMatches(
+  token: string,
+  mappings: MappingInstance[],
+  listValues: ListValue[],
+): { mapping: MappingInstance; expansion: string }[] {
+  const results: { mapping: MappingInstance; expansion: string }[] = []
+  for (const rule of mappings) {
+    const key = rule.name.trim()
+    if (!key) continue
+    const hasSlot = key.includes('<')
+    if (hasSlot) {
+      const result = matchPattern(token, key, listValues)
+      if (result.matched) {
+        results.push({ mapping: rule, expansion: expandValue(rule.expansion, result.matchedSlots) })
+      }
+    } else {
+      const isRegex = key.startsWith('/') && key.lastIndexOf('/') > 0
+      if (isRegex) {
+        try {
+          const lastSlash = key.lastIndexOf('/')
+          const pattern = key.slice(1, lastSlash)
+          const flags = key.slice(lastSlash + 1)
+          if (new RegExp(`^${pattern}$`, flags).test(token)) {
+            results.push({ mapping: rule, expansion: rule.expansion })
+          }
+        } catch { continue }
+      } else if (key === token) {
+        results.push({ mapping: rule, expansion: rule.expansion })
+      }
+    }
+  }
+  return results
+}
+
+/**
  * Attempts to expand a single token against the provided mapping rules.
  * Returns the expanded string or null if no match.
  */

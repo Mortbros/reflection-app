@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS list_values (
   value TEXT NOT NULL,
   type_id TEXT NOT NULL,
   abbreviation TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
   UNIQUE(value, type_id),
   UNIQUE(abbreviation, type_id)
 );
@@ -87,8 +88,9 @@ export function sqlitePlugin(dbPath: string): Plugin {
 
     db.run(SCHEMA)
     db.run(SUGGESTION_TYPES)
-    // Add enabled column to existing DBs that predate the schema change
+    // Add enabled columns to existing DBs that predate the schema change
     try { db.run('ALTER TABLE mapping_instance ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1') } catch {}
+    try { db.run('ALTER TABLE list_values ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1') } catch {}
     flush()
     console.log(`[sqlite] using ${dbPath}`)
   }

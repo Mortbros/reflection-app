@@ -1,19 +1,21 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, useTemplateRef } from 'vue';
+import { ref, watch, computed, onMounted, useTemplateRef, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   VContainer, VCard, VCardText, VTabs, VTab, VTabsWindow, VTabsWindowItem,
   VDataTable, VBtn, VDialog, VTextField, VCheckbox, VSelect, VSnackbar, VAlert, VFileInput,
+  VChip, VDivider,
 } from 'vuetify/components';
 import {
   getMappingInstances, insertMappingInstance, updateMappingInstance, deleteMappingInstance,
   setMappingInstanceEnabled, importMappingInstance, importListValue, importMappingType,
-  getListValues, insertListValue, updateListValue, deleteListValue,
+  getListValues, insertListValue, updateListValue, deleteListValue, setListValueEnabled,
   getMappingTypes, insertMappingType, updateMappingType, deleteMappingType,
   countMappingsUsingType, renameMappingTypeId,
   getFormHistory, deleteFormHistoryRow,
 } from '@/lib/db';
 import type { MappingInstance, ListValue, MappingType, FormHistoryRow } from '@/lib/db';
+import { findAllMatches } from '@/lib/patternMatcher';
 
 type Focusable = { focus(): void }
 
@@ -85,18 +87,8 @@ const missingExpansionTypes = computed(() => {
   );
 });
 
-// Manual button: append all missing valid slots from the name into the expansion
-const fillMissingSlots = () => {
-  const seen = new Set<string>();
-  for (const { typeId, multiple } of extractTypeSlots(mappingForm.value.name)) {
-    if (seen.has(typeId) || !validTypeIdSet.value.has(typeId)) continue;
-    seen.add(typeId);
-    if (!new RegExp(`<${typeId},?>`).test(mappingForm.value.expansion)) {
-      const slot = `<${typeId}${multiple ? ',' : ''}>`;
-      const exp = mappingForm.value.expansion;
-      mappingForm.value.expansion = exp ? `${exp.trimEnd()} ${slot}` : slot;
-    }
-  }
+const copyNameToExpansion = () => {
+  mappingForm.value.expansion = mappingForm.value.name;
 };
 
 const openAddMapping = () => {
@@ -282,13 +274,21 @@ const deleteListVal = async (id: number) => {
   notify('Deleted');
 };
 
+const toggleListValue = async (id: number, enabled: boolean) => {
+  await setListValueEnabled(id, enabled);
+  await refresh();
+};
+
 // Columns shown depend on whether the active type uses abbreviations
 const activeTypeHasAbbrevs = computed(() =>
   filteredListValues.value.some(v => v.abbreviation !== null)
 );
 
 const listValueHeaders = computed((): TableHeader[] => {
-  const cols: TableHeader[] = [{ title: 'Value', key: 'value' }];
+  const cols: TableHeader[] = [
+    { title: '', key: 'enabled', width: '44px', sortable: false },
+    { title: 'Value', key: 'value' },
+  ];
   if (activeTypeHasAbbrevs.value)
     cols.push({ title: 'Abbrev.', key: 'abbreviation', width: '110px' });
   cols.push({ title: '', key: 'actions', sortable: false, align: 'end', width: '48px' });
@@ -536,6 +536,65 @@ const deleteHistory = async (date: string) => {
   await loadHistory();
   notify('Deleted');
 };
+
+// ── Conflicts ─────────────────────────────────────────────────────────────────
+
+interface Conflict {
+  input: string
+  matches: { mapping: MappingInstance; expansion: string }[]
+}
+
+const conflicts = ref<Conflict[]>([]);
+const ignoredConflicts = ref<Set<string>>(new Set());
+const ignoreConflict = (input: string) => { ignoredConflicts.value = new Set([...ignoredConflicts.value, input]); };
+const restoreConflict = (input: string) => { const s = new Set(ignoredConflicts.value); s.delete(input); ignoredConflicts.value = s; };
+const conflictsLoaded = ref(false);
+
+const computeConflicts = () => {
+  // For each literal (non-pattern, non-regex) mapping, find every other mapping that also matches it
+  const literalMappings = mappings.value.filter(
+    m => !m.name.includes('<') && !(m.name.startsWith('/') && m.name.lastIndexOf('/') > 0)
+  );
+  const allListValues = listValues.value.filter(v => v.enabled);
+  const found: Conflict[] = [];
+  for (const lit of literalMappings) {
+    const matches = findAllMatches(lit.name, mappings.value, allListValues);
+    if (matches.length > 1) {
+      found.push({ input: lit.name, matches });
+    }
+  }
+  conflicts.value = found;
+  conflictsLoaded.value = true;
+};
+
+watch(tab, (t) => {
+  if (t === 'conflicts') computeConflicts();
+});
+
+// ── Test / Debugger ───────────────────────────────────────────────────────────
+
+const testInput = ref('');
+const testInputRef = useTemplateRef<Focusable>('testInputRef');
+
+const testPatternMatches = computed(() => {
+  const input = testInput.value.trim();
+  if (!input) return [];
+  const allListValues = listValues.value.filter(v => v.enabled);
+  return findAllMatches(input, mappings.value, allListValues);
+});
+
+const testNameMatches = computed(() => {
+  const input = testInput.value.trim();
+  if (!input) return [];
+  return mappings.value.filter(m => m.name.toLowerCase().includes(input.toLowerCase()));
+});
+
+watch(tab, async (t) => {
+  if (t === 'test') {
+    await nextTick();
+    testInputRef.value?.focus();
+  }
+});
 </script>
 
 <template>
@@ -554,6 +613,8 @@ const deleteHistory = async (date: string) => {
           <VTab value="listValues">List Values</VTab>
           <VTab value="types">Types</VTab>
           <VTab value="history" @click="loadHistory">History</VTab>
+          <VTab value="conflicts">Conflicts</VTab>
+          <VTab value="test">Test</VTab>
         </VTabs>
 
         <VCardText class="pa-2 pa-sm-3">
@@ -605,6 +666,14 @@ const deleteHistory = async (date: string) => {
               <VDataTable :headers="listValueHeaders" :items="filteredListValues" :search="listValueSearch"
                 density="compact" :items-per-page="-1" hover
                 @click:row="(_: any, { item }: any) => openEditListValue(item)" style="cursor: pointer">
+                <template #item.enabled="{ item }">
+                  <VCheckbox
+                    :model-value="item.enabled"
+                    density="compact" hide-details
+                    @click.stop
+                    @update:model-value="(v: boolean) => toggleListValue(item.id, v)"
+                  />
+                </template>
                 <template #item.abbreviation="{ item }">
                   <span v-if="item.abbreviation" class="font-weight-medium">{{ item.abbreviation }}</span>
                   <span v-else class="text-disabled text-caption">—</span>
@@ -666,6 +735,100 @@ const deleteHistory = async (date: string) => {
               </VDataTable>
             </VTabsWindowItem>
 
+            <!-- ── Conflicts ─────────────────────────────────────────────── -->
+            <VTabsWindowItem value="conflicts">
+              <div class="d-flex align-center ga-2 mb-3">
+                <VBtn size="small" prepend-icon="mdi-refresh" @click="computeConflicts">Scan</VBtn>
+                <span v-if="conflictsLoaded" class="text-body-2 text-medium-emphasis">
+                  {{ conflicts.length === 0 ? 'No conflicts found' : `${conflicts.length} conflict${conflicts.length !== 1 ? 's' : ''} found` }}
+                </span>
+              </div>
+
+              <div v-if="conflicts.length === 0 && conflictsLoaded" class="text-body-2 text-medium-emphasis pa-2">
+                No literal mappings are shadowed by pattern or regex mappings.
+              </div>
+
+              <div v-for="conflict in conflicts" :key="conflict.input" class="mb-2">
+                <!-- Collapsed (ignored) row -->
+                <div v-if="ignoredConflicts.has(conflict.input)"
+                  class="d-flex align-center ga-2 pa-2 rounded text-disabled"
+                  style="background: rgba(128,128,128,0.06); cursor: pointer"
+                  @click="restoreConflict(conflict.input)">
+                  <VBtn icon="mdi-chevron-right" size="x-small" variant="text" />
+                  <code class="text-caption">{{ conflict.input }}</code>
+                  <span class="text-caption">{{ conflict.matches.length }} matches — click to expand</span>
+                </div>
+
+                <!-- Expanded conflict card -->
+                <VCard v-else variant="outlined" class="pa-3">
+                  <div class="d-flex align-center justify-space-between mb-2">
+                    <div class="d-flex align-center ga-2">
+                      <span class="text-caption text-medium-emphasis">Input</span>
+                      <code class="text-body-2 font-weight-bold">{{ conflict.input }}</code>
+                    </div>
+                    <VBtn size="x-small" variant="text" @click="ignoreConflict(conflict.input)">
+                      Ignore
+                    </VBtn>
+                  </div>
+                  <div v-for="(match, i) in conflict.matches" :key="match.mapping.id"
+                    class="d-flex align-center ga-2 py-1"
+                    :class="i > 0 ? 'text-disabled' : ''">
+                    <VChip :color="i === 0 ? 'success' : undefined" size="x-small" :variant="i === 0 ? 'tonal' : 'outlined'">
+                      {{ i === 0 ? 'wins' : 'shadowed' }}
+                    </VChip>
+                    <code class="text-caption">{{ match.mapping.name }}</code>
+                    <span class="text-caption text-medium-emphasis">→</span>
+                    <span class="text-caption">{{ match.expansion }}</span>
+                  </div>
+                </VCard>
+              </div>
+            </VTabsWindowItem>
+
+            <!-- ── Test ───────────────────────────────────────────────────── -->
+            <VTabsWindowItem value="test">
+              <VTextField
+                ref="testInputRef"
+                v-model="testInput"
+                label="Type an input to test…"
+                density="compact" clearable hide-details class="mb-4"
+                prepend-inner-icon="mdi-magnify"
+              />
+
+              <template v-if="testInput.trim()">
+                <!-- Pattern matches -->
+                <div class="text-caption text-medium-emphasis font-weight-medium mb-1">FIRES</div>
+                <div v-if="testPatternMatches.length === 0" class="text-body-2 text-disabled mb-3 pa-1">
+                  No mapping fires on "{{ testInput.trim() }}"
+                </div>
+                <div v-for="(match, i) in testPatternMatches" :key="match.mapping.id"
+                  class="d-flex align-center ga-2 py-1 mb-1 px-2 rounded"
+                  :style="i > 0 ? 'opacity: 0.5' : ''"
+                  style="background: rgba(128,128,128,0.06)">
+                  <VChip :color="i === 0 ? 'success' : undefined" size="x-small" :variant="i === 0 ? 'tonal' : 'outlined'">
+                    {{ i === 0 ? 'fires' : 'shadowed' }}
+                  </VChip>
+                  <code class="text-caption">{{ match.mapping.name }}</code>
+                  <span class="text-caption text-medium-emphasis">→</span>
+                  <span class="text-caption">{{ match.expansion }}</span>
+                </div>
+
+                <VDivider class="my-3" />
+
+                <!-- Name contains -->
+                <div class="text-caption text-medium-emphasis font-weight-medium mb-1">NAME CONTAINS</div>
+                <div v-if="testNameMatches.length === 0" class="text-body-2 text-disabled pa-1">
+                  No mapping names contain "{{ testInput.trim() }}"
+                </div>
+                <div v-for="match in testNameMatches" :key="match.id"
+                  class="d-flex align-center ga-2 py-1 mb-1 px-2 rounded"
+                  style="background: rgba(128,128,128,0.06)">
+                  <code class="text-caption">{{ match.name }}</code>
+                  <span class="text-caption text-medium-emphasis">→</span>
+                  <span class="text-caption">{{ match.expansion }}</span>
+                </div>
+              </template>
+            </VTabsWindowItem>
+
           </VTabsWindow>
         </VCardText>
       </VCard>
@@ -685,8 +848,8 @@ const deleteHistory = async (date: string) => {
             :error="missingExpansionTypes.length > 0" :error-messages="missingExpansionTypes.length > 0
               ? `Missing: ${missingExpansionTypes.map(t => `<${t}>`).join(', ')}`
               : undefined" @keydown.enter.prevent="saveMapping" />
-          <VBtn v-if="missingExpansionTypes.length > 0" icon="mdi-auto-fix" size="small" variant="text"
-            title="Fill missing type slots" @click="fillMissingSlots" />
+          <VBtn v-if="!mappingForm.expansion && mappingForm.name" size="small" variant="tonal"
+            title="Copy name to expansion" @click="copyNameToExpansion">Copy</VBtn>
         </div>
         <VCheckbox v-if="mappingForm.id === null" v-model="mappingForm.addBase"
           label="Also add base (e.g. 'tt<person>' will also add 'tt')" density="compact" hide-details />

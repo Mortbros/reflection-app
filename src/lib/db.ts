@@ -13,6 +13,7 @@ export interface ListValue {
   value: string
   type_id: string
   abbreviation: string | null  // null = autocomplete-only; set = also usable in pattern matching
+  enabled: boolean
 }
 
 export interface MappingType {
@@ -102,18 +103,21 @@ export async function importMappingType(id: string, name: string): Promise<void>
 
 // ── List values ──────────────────────────────────────────────────────────────
 
-/** Returns all list_values rows. Pass forPatternMatching=true to exclude rows with null abbreviation. */
+/** Returns all list_values rows. Pass forPatternMatching=true to only return enabled rows with an abbreviation. */
 export async function getListValues(forPatternMatching = false): Promise<ListValue[]> {
   const sql = forPatternMatching
-    ? 'SELECT id, value, type_id, abbreviation FROM list_values WHERE abbreviation IS NOT NULL ORDER BY type_id, abbreviation'
-    : 'SELECT id, value, type_id, abbreviation FROM list_values ORDER BY type_id, value'
-  return toObjects(await query(sql))
+    ? 'SELECT id, value, type_id, abbreviation, enabled FROM list_values WHERE abbreviation IS NOT NULL AND enabled = 1 ORDER BY type_id, abbreviation'
+    : 'SELECT id, value, type_id, abbreviation, enabled FROM list_values ORDER BY type_id, value'
+  const rows = toObjects<{ id: number; value: string; type_id: string; abbreviation: string | null; enabled: number }>(
+    await query(sql)
+  )
+  return rows.map(r => ({ ...r, enabled: r.enabled !== 0 }))
 }
 
-/** Returns display values for autocomplete — all values for the given type. */
+/** Returns display values for autocomplete — enabled values for the given type. */
 export async function getSuggestions(typeId: string): Promise<string[]> {
   const rows = toObjects<{ value: string }>(
-    await query('SELECT value FROM list_values WHERE type_id = ? ORDER BY value', [typeId])
+    await query('SELECT value FROM list_values WHERE type_id = ? AND enabled = 1 ORDER BY value', [typeId])
   )
   return rows.map((r) => r.value)
 }
@@ -134,6 +138,10 @@ export async function updateListValue(id: number, value: string, typeId: string,
 
 export async function deleteListValue(id: number): Promise<void> {
   await exec('DELETE FROM list_values WHERE id = ?', [id])
+}
+
+export async function setListValueEnabled(id: number, enabled: boolean): Promise<void> {
+  await exec('UPDATE list_values SET enabled = ? WHERE id = ?', [enabled ? 1 : 0, id])
 }
 
 // ── Mapping types ────────────────────────────────────────────────────────────
