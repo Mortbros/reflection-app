@@ -8,7 +8,8 @@ import { scoreFrecency } from '@/lib/frecency';
 import type { TokenUsageRow, FrecencySuggestion } from '@/lib/frecency';
 
 interface Suggestion {
-  kind: 'pattern' | 'frecency' | 'mapping'
+  /** pattern = full match; mapping = fully-resolved prefix candidate; hint = partially-resolved (informational only); frecency = history */
+  kind: 'pattern' | 'mapping' | 'hint' | 'frecency'
   rawInput: string
   mappingName: string | null
   expansion: string
@@ -92,57 +93,122 @@ const highlight = (text: string, query: string): string => {
   );
 };
 
-// ── Pattern prefix candidates ─────────────────────────────────────────────────
+// ── Pattern prefix resolution ─────────────────────────────────────────────────
 
 /**
- * For pattern mappings (e.g. `<perso>dmt` → `<perso> drove me to`), resolves
- * the first type slot with each matching list value abbreviation and checks if
- * the typed token is a prefix of the resulting candidate token.
+ * Greedily resolves pattern slots from the typed token, in order.
+ * Returns the best expansion displayable from the current token prefix,
+ * replacing any unresolved slots with '…'.
  *
- * Only emits a suggestion when the expansion becomes fully resolved after
- * the substitution (no remaining slots) — so it's safe to accept as-is.
+ * Returns null if not even the first slot could be matched.
  *
- * Example: mapping `<perso>dmt`, listValue abbrev "i" → value "Izzy"
- *   candidate token: "idmt", candidate expansion: "Izzy drove me to"
- *   token "i"   → "idmt".startsWith("i") → show "Izzy drove me to"
- *   token "idm" → "idmt".startsWith("idm") → show "Izzy drove me to"
+ * Examples with pattern `<perso><transport>mt`, expansion `<perso> <transport> me to`:
+ *   token "i"  → {resolved: "Izzy … me to",      complete: false}
+ *   token "id" → {resolved: "Izzy drove me to",   complete: true}  (if "d"=drove resolves)
+ *   token "i"  → {resolved: "Izzy … me to",       complete: false} (hint only)
+ */
+const resolveFromToken = (
+  patternName: string,
+  expansion: string,
+  token: string,
+  lvList: ListValue[],
+): { resolved: string; complete: boolean } | null => {
+  let remaining = token.toLowerCase();
+  let result = expansion;
+  let nameRest = patternName;
+
+  while (nameRest.length > 0) {
+    const slotMatch = nameRest.match(/^(.*?)<(\w+)(,?)>(.*)/s);
+    if (!slotMatch) break; // only literal text left in pattern
+
+    const [, literalBefore, typeId, isMultiple, afterSlot] = slotMatch;
+
+    // Consume the literal prefix portion from the typed token
+    if (literalBefore) {
+      const litL = literalBefore.toLowerCase();
+      if (remaining.startsWith(litL)) {
+        remaining = remaining.slice(litL.length);
+      } else if (litL.startsWith(remaining)) {
+        break; // token is a partial prefix of the literal — no more slots to resolve
+      } else {
+        return null; // literal mismatch
+      }
+    }
+
+    if (remaining.length === 0) break; // token fully consumed, remaining slots unresolved
+
+    // Try to match the next list value abbreviation
+    const slotTag = isMultiple ? `<${typeId},>` : `<${typeId}>`;
+    const typeValues = lvList
+      .filter(lv => lv.type_id === typeId && lv.enabled && lv.abbreviation)
+      .sort((a, b) => (b.abbreviation?.length ?? 0) - (a.abbreviation?.length ?? 0)); // prefer longer abbrevs
+
+    let matched = false;
+    for (const lv of typeValues) {
+      if (remaining.startsWith(lv.abbreviation!.toLowerCase())) {
+        result = result.replace(slotTag, lv.value);
+        remaining = remaining.slice(lv.abbreviation!.length);
+        nameRest = afterSlot;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) break;
+  }
+
+  if (result === expansion) return null; // nothing was resolved
+
+  const stillHasSlots = /<\w+,?>/.test(result);
+  return {
+    resolved: result.replace(/<\w+,?>/g, '…'),
+    complete: !stillHasSlots,
+  };
+};
+
+/**
+ * For each pattern mapping, tries to resolve as many slots as possible from
+ * the typed token. Fully-resolved results are 'mapping' (acceptable);
+ * partially-resolved are 'hint' (informational, not inserted on accept).
  */
 const genPatternPrefixCandidates = (
   token: string,
   mappingList: MappingInstance[],
   lvList: ListValue[],
-): Array<{ mappingName: string; expansion: string }> => {
+): Array<{ mappingName: string; expansion: string; complete: boolean }> => {
   if (!token) return [];
   const lower = token.toLowerCase();
   const seen = new Set<string>();
-  const results: Array<{ mappingName: string; expansion: string }> = [];
+  const results: Array<{ mappingName: string; expansion: string; complete: boolean }> = [];
 
   for (const m of mappingList) {
     if (!m.enabled) continue;
     const name = m.name.trim();
-    if (!name.includes('<')) continue; // literal mappings use name-prefix tier
+    if (!name.includes('<')) continue;
 
-    const slotMatch = name.match(/^(.*?)<(\w+)(,?)>/);
-    if (!slotMatch) continue;
-    const [, literalBefore, typeId, isMultiple] = slotMatch;
-
-    const slotTag = isMultiple ? `<${typeId},>` : `<${typeId}>`;
+    // Quick gate: check if the typed token could be a prefix of any candidate
+    // by matching against the first slot's possible abbreviations
+    const firstSlot = name.match(/^(.*?)<(\w+)(,?)>/);
+    if (!firstSlot) continue;
+    const [, literalBefore, typeId] = firstSlot;
     const typeValues = lvList.filter(lv => lv.type_id === typeId && lv.enabled && lv.abbreviation);
 
+    let hasCandidate = false;
     for (const lv of typeValues) {
-      const candidatePrefix = (literalBefore + lv.abbreviation!).toLowerCase();
-
-      // Typed token must be a prefix of the candidate, or vice versa
-      if (!lower.startsWith(candidatePrefix) && !candidatePrefix.startsWith(lower)) continue;
-
-      // Resolve the first slot; skip if expansion still has unresolved slots
-      const resolved = m.expansion.replace(slotTag, lv.value);
-      if (/<\w+,?>/.test(resolved)) continue;
-
-      if (!seen.has(resolved)) {
-        seen.add(resolved);
-        results.push({ mappingName: m.name, expansion: resolved });
+      const candidateStart = (literalBefore + lv.abbreviation!).toLowerCase();
+      if (lower.startsWith(candidateStart) || candidateStart.startsWith(lower)) {
+        hasCandidate = true;
+        break;
       }
+    }
+    if (!hasCandidate) continue;
+
+    // Resolve as many slots as possible from the token
+    const resolution = resolveFromToken(name, m.expansion, lower, lvList);
+    if (!resolution) continue;
+
+    if (!seen.has(resolution.resolved)) {
+      seen.add(resolution.resolved);
+      results.push({ mappingName: m.name, expansion: resolution.resolved, complete: resolution.complete });
     }
   }
   return results;
@@ -155,8 +221,9 @@ const genPatternPrefixCandidates = (
  * are matched — expansion text is never used as a match source.
  *
  *   500   exact pattern match for full token (findAllMatches)
- *   400   literal mapping name starts with token
- *   300   pattern prefix candidate (e.g. "i" or "id" → "Izzy drove me to")
+ *   400   literal mapping name starts with token (no slots in name)
+ *   300   pattern prefix candidate, fully resolved from token
+ *   280   pattern prefix candidate, partially resolved (hint — shown but not inserted)
  *   200+  frecency: raw_input starts with token (+ recency bonus, cap 90)
  */
 const rankSuggestions = (
@@ -188,9 +255,12 @@ const rankSuggestions = (
     }
   }
 
-  // Tier 3: pattern prefix candidates (e.g. typing "i" or "id" → "Izzy drove me to")
-  for (const { mappingName, expansion } of genPatternPrefixCandidates(token, mappingList, lvList)) {
-    add({ kind: 'mapping', rawInput: token, mappingName, expansion }, 300);
+  // Tier 3: pattern prefix candidates (greedy slot resolution from typed token)
+  for (const { mappingName, expansion, complete } of genPatternPrefixCandidates(token, mappingList, lvList)) {
+    add(
+      { kind: complete ? 'mapping' : 'hint', rawInput: token, mappingName, expansion },
+      complete ? 300 : 280,
+    );
   }
 
   // Tier 4: frecency fallback — raw_input starts with typed token
@@ -231,7 +301,11 @@ const clearDropdown = () => {
 
 // ── Accept suggestion ─────────────────────────────────────────────────────────
 
+const isAcceptable = (s: Suggestion) => s.kind !== 'hint';
+
 const acceptSuggestion = async (suggestion: Suggestion) => {
+  if (!isAcceptable(suggestion)) return;
+
   const textarea = getTextarea();
   if (!textarea) return;
 
@@ -323,8 +397,20 @@ const handleKeydown = async (e: KeyboardEvent) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); selectedIndex.value = Math.min(selectedIndex.value + 1, suggestions.value.length - 1); return; }
     if (e.key === 'ArrowUp')   { e.preventDefault(); selectedIndex.value = Math.max(selectedIndex.value - 1, -1); return; }
     if ((e.key === 'Tab' && !e.shiftKey) || e.key === 'Enter') {
+      // Find first acceptable suggestion (skip hints)
       const idx = selectedIndex.value >= 0 ? selectedIndex.value : 0;
-      if (suggestions.value[idx]) { e.preventDefault(); await acceptSuggestion(suggestions.value[idx]); return; }
+      const target = suggestions.value[idx];
+      if (target && isAcceptable(target)) {
+        e.preventDefault();
+        await acceptSuggestion(target);
+        return;
+      }
+      // If selected is a hint, just close
+      if (target && !isAcceptable(target)) {
+        e.preventDefault();
+        clearDropdown();
+        return;
+      }
     }
   }
 
@@ -394,17 +480,22 @@ defineExpose({ focus, capitalize });
           :key="i"
           :active="i === selectedIndex"
           color="primary"
-          style="cursor: pointer"
+          :style="{ cursor: s.kind === 'hint' ? 'default' : 'pointer', opacity: s.kind === 'hint' ? 0.6 : 1 }"
           @click="acceptSuggestion(s)"
         >
           <!-- eslint-disable-next-line vue/no-v-html -->
-          <VListItemTitle class="text-body-2" v-html="s.kind === 'pattern' ? escHtml(s.expansion) : highlight(s.expansion, currentToken)" />
+          <VListItemTitle
+            class="text-body-2"
+            :class="{ 'font-italic': s.kind === 'hint' }"
+            v-html="s.kind === 'pattern' ? escHtml(s.expansion) : highlight(s.expansion, currentToken)"
+          />
           <VListItemSubtitle v-if="s.mappingName" class="text-caption text-disabled">
             {{ s.mappingName }}
           </VListItemSubtitle>
           <template #append>
             <VChip v-if="s.kind === 'frecency'" size="x-small" color="primary" variant="tonal">recent</VChip>
             <VChip v-else-if="s.kind === 'pattern'" size="x-small" color="success" variant="tonal">match</VChip>
+            <VChip v-else-if="s.kind === 'hint'" size="x-small" color="secondary" variant="tonal">keep typing</VChip>
           </template>
         </VListItem>
       </VList>
