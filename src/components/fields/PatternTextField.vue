@@ -49,6 +49,7 @@ const shortcutMode = ref(true);
 const suggestions = ref<Suggestion[]>([]);
 const selectedIndex = ref(-1);
 const dropdownPos = ref<{ top: number; left: number } | null>(null);
+const currentToken = ref('');
 
 const getTextarea = (): HTMLTextAreaElement | null =>
   textareaRef.value?.$el?.querySelector('textarea') ?? null;
@@ -91,13 +92,70 @@ const highlight = (text: string, query: string): string => {
   );
 };
 
+// ── Pattern prefix candidates ─────────────────────────────────────────────────
+
+/**
+ * For pattern mappings (e.g. `<perso>dmt` → `<perso> drove me to`), resolves
+ * the first type slot with each matching list value abbreviation and checks if
+ * the typed token is a prefix of the resulting candidate token.
+ *
+ * Only emits a suggestion when the expansion becomes fully resolved after
+ * the substitution (no remaining slots) — so it's safe to accept as-is.
+ *
+ * Example: mapping `<perso>dmt`, listValue abbrev "i" → value "Izzy"
+ *   candidate token: "idmt", candidate expansion: "Izzy drove me to"
+ *   token "i"   → "idmt".startsWith("i") → show "Izzy drove me to"
+ *   token "idm" → "idmt".startsWith("idm") → show "Izzy drove me to"
+ */
+const genPatternPrefixCandidates = (
+  token: string,
+  mappingList: MappingInstance[],
+  lvList: ListValue[],
+): Array<{ mappingName: string; expansion: string }> => {
+  if (!token) return [];
+  const lower = token.toLowerCase();
+  const seen = new Set<string>();
+  const results: Array<{ mappingName: string; expansion: string }> = [];
+
+  for (const m of mappingList) {
+    if (!m.enabled) continue;
+    const name = m.name.trim();
+    if (!name.includes('<')) continue; // literal mappings use name-prefix tier
+
+    const slotMatch = name.match(/^(.*?)<(\w+)(,?)>/);
+    if (!slotMatch) continue;
+    const [, literalBefore, typeId, isMultiple] = slotMatch;
+
+    const slotTag = isMultiple ? `<${typeId},>` : `<${typeId}>`;
+    const typeValues = lvList.filter(lv => lv.type_id === typeId && lv.enabled && lv.abbreviation);
+
+    for (const lv of typeValues) {
+      const candidatePrefix = (literalBefore + lv.abbreviation!).toLowerCase();
+
+      // Typed token must be a prefix of the candidate, or vice versa
+      if (!lower.startsWith(candidatePrefix) && !candidatePrefix.startsWith(lower)) continue;
+
+      // Resolve the first slot; skip if expansion still has unresolved slots
+      const resolved = m.expansion.replace(slotTag, lv.value);
+      if (/<\w+,?>/.test(resolved)) continue;
+
+      if (!seen.has(resolved)) {
+        seen.add(resolved);
+        results.push({ mappingName: m.name, expansion: resolved });
+      }
+    }
+  }
+  return results;
+};
+
 // ── Ranking ───────────────────────────────────────────────────────────────────
 
 /**
  * Tiers (higher = better):
- *   500   exact pattern match (mudmt → Mum drove me to …)
+ *   500   exact pattern match for full token (findAllMatches)
  *   400+  expansion starts with token (frecency + bonus)
- *   350   expansion starts with token (mapping)
+ *   350   expansion starts with token (mapping template)
+ *   340   pattern prefix candidate (e.g. "i" → "Izzy drove me to")
  *   300+  raw_input starts with token (frecency + bonus)
  *   250   name starts with token (mapping)
  *   200+  expansion contains token (frecency)
@@ -109,6 +167,7 @@ const rankSuggestions = (
   token: string,
   frecency: FrecencySuggestion[],
   mappingList: MappingInstance[],
+  lvList: ListValue[],
   max: number,
 ): Suggestion[] => {
   const lower = token.toLowerCase();
@@ -120,8 +179,8 @@ const rankSuggestions = (
     if (!seen.has(s.expansion)) { seen.add(s.expansion); ranked.push({ ...s, rank }); }
   };
 
-  // Tier 1: exact pattern matches (highest priority — the "mudmt" case)
-  for (const { mapping, expansion } of findAllMatches(token, mappingList, props.listValues ?? [])) {
+  // Tier 1: exact pattern match (full token resolves a pattern)
+  for (const { mapping, expansion } of findAllMatches(token, mappingList, lvList)) {
     add({ kind: 'pattern', rawInput: token, mappingName: mapping.name, expansion }, 500);
   }
 
@@ -136,7 +195,7 @@ const rankSuggestions = (
     else if (rawL.includes(lower))   add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 100 + bonus);
   }
 
-  // Tier 3: mapping text fallbacks
+  // Tier 3a: mapping text fallbacks (literal parts)
   for (const m of mappingList) {
     if (!m.enabled) continue;
     const expL = m.expansion.toLowerCase();
@@ -145,6 +204,12 @@ const rankSuggestions = (
     else if (nameL.startsWith(lower)) add({ kind: 'mapping', rawInput: token, mappingName: m.name, expansion: m.expansion }, 250);
     else if (expL.includes(lower))    add({ kind: 'mapping', rawInput: token, mappingName: m.name, expansion: m.expansion }, 150);
     else if (nameL.includes(lower))   add({ kind: 'mapping', rawInput: token, mappingName: m.name, expansion: m.expansion }, 50);
+  }
+
+  // Tier 3b: pattern prefix candidates — surfaces single-slot pattern mappings
+  // while typing the abbreviation prefix (e.g. "i" or "id" → "Izzy drove me to")
+  for (const { mappingName, expansion } of genPatternPrefixCandidates(token, mappingList, lvList)) {
+    add({ kind: 'mapping', rawInput: token, mappingName, expansion }, 340);
   }
 
   return ranked.sort((a, b) => b.rank - a.rank).slice(0, max);
@@ -165,7 +230,7 @@ const fetchSuggestions = (token: string) => {
   );
   const scored = scoreFrecency(rows, halfLife);
 
-  suggestions.value = rankSuggestions(token, scored, props.mappings ?? [], max);
+  suggestions.value = rankSuggestions(token, scored, props.mappings ?? [], props.listValues ?? [], max);
   selectedIndex.value = -1;
 };
 
@@ -176,8 +241,6 @@ const clearDropdown = () => {
 };
 
 // ── Accept suggestion ─────────────────────────────────────────────────────────
-
-const currentToken = ref('');
 
 const acceptSuggestion = async (suggestion: Suggestion) => {
   const textarea = getTextarea();
@@ -341,7 +404,7 @@ defineExpose({ focus, capitalize });
           v-for="(s, i) in suggestions"
           :key="i"
           :active="i === selectedIndex"
-          active-color="primary"
+          color="primary"
           style="cursor: pointer"
           @click="acceptSuggestion(s)"
         >
