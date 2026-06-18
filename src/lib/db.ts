@@ -265,3 +265,61 @@ export async function deleteFormHistoryRow(date: string): Promise<void> {
   await exec('DELETE FROM form_history WHERE date = ?', [date])
 }
 
+// ── Token usage (frecency) ────────────────────────────────────────────────────
+
+import type { TokenUsageRow } from './frecency'
+
+export async function recordTokenUsage(
+  rawInput: string,
+  mappingName: string | null,
+  expansion: string,
+): Promise<void> {
+  await exec(
+    'INSERT INTO token_usage (raw_input, mapping_name, expansion, used_at) VALUES (?, ?, ?, ?)',
+    [rawInput, mappingName, expansion, new Date().toISOString()]
+  )
+  // Prune oldest rows when over the configured limit
+  await exec(
+    `DELETE FROM token_usage WHERE id IN (
+       SELECT id FROM token_usage ORDER BY used_at ASC
+       LIMIT MAX(0, (SELECT COUNT(*) FROM token_usage) - (
+         SELECT CAST(value AS INTEGER) FROM app_settings WHERE key = 'token_usage_max_rows'
+       ))
+     )`
+  )
+}
+
+/** Returns recent token_usage rows whose raw_input starts with the given prefix. */
+export async function getTokenUsageForPrefix(prefix: string, windowDays: number): Promise<TokenUsageRow[]> {
+  return toObjects(await query(
+    `SELECT raw_input, mapping_name, expansion, used_at FROM token_usage
+     WHERE raw_input LIKE ? AND used_at > datetime('now', ?)
+     ORDER BY used_at DESC LIMIT 500`,
+    [prefix + '%', `-${windowDays} days`]
+  ))
+}
+
+/** Unmapped tokens (mapping_name IS NULL) that exceed the frequency threshold. */
+export async function getUnmappedFrequent(threshold: number, minLength: number): Promise<{ raw_input: string; count: number }[]> {
+  return toObjects(await query(
+    `SELECT raw_input, COUNT(*) as count FROM token_usage
+     WHERE mapping_name IS NULL AND LENGTH(raw_input) >= ?
+     GROUP BY raw_input HAVING count >= ?
+     ORDER BY count DESC`,
+    [minLength, threshold]
+  ))
+}
+
+// ── App settings ──────────────────────────────────────────────────────────────
+
+export async function getAllAppSettings(): Promise<Record<string, string>> {
+  const rows = toObjects<{ key: string; value: string }>(
+    await query('SELECT key, value FROM app_settings')
+  )
+  return Object.fromEntries(rows.map(r => [r.key, r.value]))
+}
+
+export async function setAppSetting(key: string, value: string): Promise<void> {
+  await exec('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [key, value])
+}
+

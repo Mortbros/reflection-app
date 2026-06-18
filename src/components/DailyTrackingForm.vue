@@ -14,7 +14,7 @@ import TimeDisplay from '@/components/fields/TimeDisplay.vue';
 import AutocompleteField from '@/components/fields/AutocompleteField.vue';
 import AutocompleteListField from '@/components/fields/AutocompleteListField.vue';
 import { getTodayDate, getYesterdayDate } from '@/lib/fieldUtils';
-import { getMappingInstances, getListValues, getSuggestions, upsertFormHistory } from '@/lib/db';
+import { getMappingInstances, getListValues, getSuggestions, upsertFormHistory, getAllAppSettings } from '@/lib/db';
 import type { MappingInstance, ListValue } from '@/lib/db';
 
 const router = useRouter();
@@ -30,22 +30,30 @@ const dbGameSuggestions = ref<string[]>([]);
 const dbPhaseSuggestions = ref<string[]>([]);
 const dbLoaded = ref(false);
 
+// Frecency / autocomplete settings loaded from app_settings
+const halfLifeDays = ref(7);
+const maxSuggestions = ref(5);
+const debounceMs = ref(80);
+
 const loadDb = async () => {
-  [
-    dbMappings.value,
-    dbListValues.value,
-    dbExerciseSuggestions.value,
-    dbMusicSuggestions.value,
-    dbGameSuggestions.value,
-    dbPhaseSuggestions.value,
-  ] = await Promise.all([
-    getMappingInstances(true),   // only enabled mappings
-    getListValues(true),   // pattern matching only — rows with abbreviation set
+  const [m, lv, ex, mu, ga, ph, settings] = await Promise.all([
+    getMappingInstances(true),
+    getListValues(true),
     getSuggestions('exercise'),
     getSuggestions('music'),
     getSuggestions('game'),
     getSuggestions('phase'),
+    getAllAppSettings(),
   ]);
+  dbMappings.value = m;
+  dbListValues.value = lv;
+  dbExerciseSuggestions.value = ex;
+  dbMusicSuggestions.value = mu;
+  dbGameSuggestions.value = ga;
+  dbPhaseSuggestions.value = ph;
+  halfLifeDays.value = parseFloat(settings.frecency_halflife_days ?? '7') || 7;
+  maxSuggestions.value = parseInt(settings.autocomplete_max_results ?? '5') || 5;
+  debounceMs.value = parseInt(settings.autocomplete_debounce_ms ?? '80') || 80;
   dbLoaded.value = true;
 };
 
@@ -500,6 +508,7 @@ onMounted(async () => {
 
               <PatternTextField ref="happenedRef" v-model="formData.happened" label="Happened" :required="true"
                 :mappings="dbMappings" :list-values="dbListValues"
+                :half-life-days="halfLifeDays" :max-suggestions="maxSuggestions" :debounce-ms="debounceMs"
                 :on-next="focusRules['happened']" :on-previous="prevRules['happened']" />
               <VBtn size="small" variant="outlined" @click="formRefs.happened.value?.capitalize()">
                 Capitalize

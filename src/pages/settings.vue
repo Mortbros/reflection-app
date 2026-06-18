@@ -13,6 +13,7 @@ import {
   getMappingTypes, insertMappingType, updateMappingType, deleteMappingType,
   countMappingsUsingType, renameMappingTypeId,
   getFormHistory, deleteFormHistoryRow,
+  getUnmappedFrequent, getAllAppSettings, setAppSetting,
 } from '@/lib/db';
 import type { MappingInstance, ListValue, MappingType, FormHistoryRow } from '@/lib/db';
 import { findAllMatches } from '@/lib/patternMatcher';
@@ -537,6 +538,50 @@ const deleteHistory = async (date: string) => {
   notify('Deleted');
 };
 
+// ── Suggestions (unmapped frequent tokens) ────────────────────────────────────
+
+const suggestions = ref<{ raw_input: string; count: number }[]>([]);
+const suggestionsLoaded = ref(false);
+
+const appSettings = ref<Record<string, string>>({});
+const loadAppSettings = async () => { appSettings.value = await getAllAppSettings(); };
+
+const loadSuggestions = async () => {
+  const threshold = parseInt(appSettings.value.suggestion_threshold ?? '3') || 3;
+  const minLen = parseInt(appSettings.value.suggestion_min_length ?? '4') || 4;
+  suggestions.value = await getUnmappedFrequent(threshold, minLen);
+  suggestionsLoaded.value = true;
+};
+
+const settingKeys = [
+  { key: 'frecency_halflife_days',   label: 'Frecency half-life (days)',      hint: 'Score halves every N days. Lower = recency matters more.' },
+  { key: 'suggestion_threshold',     label: 'Suggestion threshold (uses)',     hint: 'Minimum times an unmapped phrase must appear before it shows here.' },
+  { key: 'suggestion_min_length',    label: 'Min token length for suggestions', hint: 'Unmapped tokens shorter than this are not tracked as candidates.' },
+  { key: 'token_usage_max_rows',     label: 'Max usage rows stored',           hint: 'Oldest rows pruned automatically when this limit is exceeded.' },
+  { key: 'autocomplete_max_results', label: 'Autocomplete max results',        hint: 'Maximum suggestions shown in the dropdown.' },
+  { key: 'autocomplete_debounce_ms', label: 'Autocomplete debounce (ms)',      hint: 'Delay before fetching suggestions after a keystroke.' },
+] as const;
+
+const saveSetting = async (key: string, value: string) => {
+  await setAppSetting(key, value);
+  appSettings.value = { ...appSettings.value, [key]: value };
+};
+
+watch(tab, async (t) => {
+  if (t === 'suggestions') {
+    if (!Object.keys(appSettings.value).length) await loadAppSettings();
+    await loadSuggestions();
+  }
+  if (t === 'appSettings' && !Object.keys(appSettings.value).length) await loadAppSettings();
+});
+
+// Pre-fill mapping dialog from a suggestion
+const openAddMappingFromSuggestion = (rawInput: string) => {
+  mappingForm.value = { id: null, name: rawInput, expansion: '', addBase: false };
+  mappingDialog.value = true;
+  tab.value = 'mappings';
+};
+
 // ── Conflicts ─────────────────────────────────────────────────────────────────
 
 interface Conflict {
@@ -615,6 +660,8 @@ watch(tab, async (t) => {
           <VTab value="history" @click="loadHistory">History</VTab>
           <VTab value="conflicts">Conflicts</VTab>
           <VTab value="test">Test</VTab>
+          <VTab value="suggestions">Suggestions</VTab>
+          <VTab value="appSettings">Frecency</VTab>
         </VTabs>
 
         <VCardText class="pa-2 pa-sm-3">
@@ -827,6 +874,49 @@ watch(tab, async (t) => {
                   <span class="text-caption">{{ match.expansion }}</span>
                 </div>
               </template>
+            </VTabsWindowItem>
+
+            <!-- ── Suggestions ─────────────────────────────────────────── -->
+            <VTabsWindowItem value="suggestions">
+              <div class="d-flex align-center ga-2 mb-3">
+                <VBtn size="small" prepend-icon="mdi-refresh" @click="loadSuggestions">Refresh</VBtn>
+                <span class="text-body-2 text-medium-emphasis">
+                  Unmapped tokens typed ≥ {{ appSettings.suggestion_threshold ?? 3 }} times
+                </span>
+              </div>
+
+              <div v-if="suggestionsLoaded && suggestions.length === 0" class="text-body-2 text-disabled pa-2">
+                No candidates yet — keep using the app and check back later.
+              </div>
+
+              <div v-for="s in suggestions" :key="s.raw_input"
+                class="d-flex align-center ga-3 py-2 px-2 rounded mb-1"
+                style="background: rgba(128,128,128,0.06)">
+                <code class="text-body-2 font-weight-medium flex-grow-1">{{ s.raw_input }}</code>
+                <VChip size="small" variant="tonal">{{ s.count }}×</VChip>
+                <VBtn size="small" variant="tonal" prepend-icon="mdi-plus"
+                  @click="openAddMappingFromSuggestion(s.raw_input)">
+                  Create mapping
+                </VBtn>
+              </div>
+            </VTabsWindowItem>
+
+            <!-- ── Frecency settings ───────────────────────────────────── -->
+            <VTabsWindowItem value="appSettings">
+              <div class="d-flex flex-column ga-4" style="max-width: 480px">
+                <div v-for="setting in settingKeys" :key="setting.key">
+                  <VTextField
+                    :model-value="appSettings[setting.key] ?? ''"
+                    :label="setting.label"
+                    :hint="setting.hint"
+                    density="compact"
+                    persistent-hint
+                    type="number"
+                    min="1"
+                    @change="(e: Event) => saveSetting(setting.key, (e.target as HTMLInputElement).value)"
+                  />
+                </div>
+              </div>
             </VTabsWindowItem>
 
           </VTabsWindow>

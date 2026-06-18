@@ -27,6 +27,29 @@ CREATE TABLE IF NOT EXISTS mapping_instance (
   enabled INTEGER NOT NULL DEFAULT 1   -- 0 = disabled (skipped by pattern matcher)
 );
 
+-- One row per token use; no foreign keys so records survive mapping edits/deletes
+CREATE TABLE IF NOT EXISTS token_usage (
+  id           INTEGER PRIMARY KEY,
+  raw_input    TEXT NOT NULL,       -- what the user typed (e.g. 'dt')
+  mapping_name TEXT,                -- NULL when no mapping fired
+  expansion    TEXT NOT NULL,       -- what it expanded to (same as raw_input when no mapping)
+  used_at      TEXT NOT NULL        -- ISO 8601 timestamp
+);
+
+-- Key/value store for user-configurable settings
+CREATE TABLE IF NOT EXISTS app_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO app_settings (key, value) VALUES
+  ('frecency_halflife_days',   '7'),
+  ('suggestion_threshold',     '3'),
+  ('suggestion_min_length',    '4'),
+  ('token_usage_max_rows',     '10000'),
+  ('autocomplete_max_results', '5'),
+  ('autocomplete_debounce_ms', '80');
+
 CREATE TABLE IF NOT EXISTS form_history (
   date      TEXT PRIMARY KEY,  -- YYYY-MM-DD; UPSERT key so one row per day
   bathe     TEXT,

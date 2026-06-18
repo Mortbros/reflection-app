@@ -22,6 +22,17 @@ CREATE TABLE IF NOT EXISTS mapping_instance (
   expansion TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS token_usage (
+  id       INTEGER PRIMARY KEY,
+  raw_input    TEXT NOT NULL,
+  mapping_name TEXT,              -- NULL when no mapping fired
+  expansion    TEXT NOT NULL,
+  used_at      TEXT NOT NULL      -- ISO 8601
+);
+CREATE TABLE IF NOT EXISTS app_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS form_history (
   date      TEXT PRIMARY KEY,
   bathe     TEXT,
@@ -47,6 +58,16 @@ CREATE TABLE IF NOT EXISTS form_history (
   output    TEXT,
   saved_at  TEXT
 );
+`
+
+const DEFAULT_SETTINGS = `
+INSERT OR IGNORE INTO app_settings (key, value) VALUES
+  ('frecency_halflife_days',    '7'),
+  ('suggestion_threshold',      '3'),
+  ('suggestion_min_length',     '4'),
+  ('token_usage_max_rows',      '10000'),
+  ('autocomplete_max_results',  '5'),
+  ('autocomplete_debounce_ms',  '80');
 `
 
 const SUGGESTION_TYPES = `
@@ -88,6 +109,7 @@ export function sqlitePlugin(dbPath: string): Plugin {
 
     db.run(SCHEMA)
     db.run(SUGGESTION_TYPES)
+    db.run(DEFAULT_SETTINGS)
     // Add enabled columns to existing DBs that predate the schema change
     try { db.run('ALTER TABLE mapping_instance ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1') } catch {}
     try { db.run('ALTER TABLE list_values ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1') } catch {}
