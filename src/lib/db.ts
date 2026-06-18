@@ -294,10 +294,7 @@ export async function recordTokenUsage(
   }
 }
 
-/**
- * Returns all recent token_usage rows within a rolling window.
- * Loaded once on form mount and kept in memory; no DB queries during typing.
- */
+/** Returns all recent token_usage rows within a rolling window. Loaded once on mount; no DB queries during typing. */
 export async function getAllRecentTokenUsage(windowDays: number): Promise<TokenUsageRow[]> {
   return toObjects(await query(
     `SELECT raw_input, mapping_name, expansion, used_at FROM token_usage
