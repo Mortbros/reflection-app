@@ -589,7 +589,6 @@ const settingKeys = [
   { key: 'suggestion_min_length',    label: 'Min token length for suggestions', hint: 'Unmapped tokens shorter than this are not tracked as candidates.' },
   { key: 'token_usage_max_rows',     label: 'Max usage rows stored',           hint: 'Oldest rows pruned automatically when this limit is exceeded.' },
   { key: 'autocomplete_max_results', label: 'Autocomplete max results',        hint: 'Maximum suggestions shown in the dropdown.' },
-  { key: 'autocomplete_debounce_ms', label: 'Autocomplete debounce (ms)',      hint: 'Delay before fetching suggestions after a keystroke.' },
 ] as const;
 
 const saveSetting = async (key: string, value: string) => {

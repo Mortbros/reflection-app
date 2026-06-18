@@ -295,16 +295,15 @@ export async function recordTokenUsage(
 }
 
 /**
- * Returns recent token_usage rows where raw_input OR expansion starts with the given prefix.
- * Used to build frecency suggestions — both "you typed X before" and "X expanded to Y" are relevant.
+ * Returns all recent token_usage rows within a rolling window.
+ * Loaded once on form mount and kept in memory; no DB queries during typing.
  */
-export async function getTokenUsageForPrefix(prefix: string, windowDays: number): Promise<TokenUsageRow[]> {
+export async function getAllRecentTokenUsage(windowDays: number): Promise<TokenUsageRow[]> {
   return toObjects(await query(
     `SELECT raw_input, mapping_name, expansion, used_at FROM token_usage
-     WHERE (raw_input LIKE ? OR expansion LIKE ?)
-       AND used_at > datetime('now', ?)
-     ORDER BY used_at DESC LIMIT 500`,
-    [prefix + '%', prefix + '%', `-${windowDays} days`]
+     WHERE used_at > datetime('now', ?)
+     ORDER BY used_at DESC LIMIT 5000`,
+    [`-${windowDays} days`]
   ))
 }
 

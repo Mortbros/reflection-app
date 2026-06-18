@@ -66,8 +66,7 @@ INSERT OR IGNORE INTO app_settings (key, value) VALUES
   ('suggestion_threshold',      '3'),
   ('suggestion_min_length',     '4'),
   ('token_usage_max_rows',      '10000'),
-  ('autocomplete_max_results',  '5'),
-  ('autocomplete_debounce_ms',  '80');
+  ('autocomplete_max_results',  '5');
 `
 
 const SUGGESTION_TYPES = `
@@ -93,6 +92,23 @@ function json(res: ServerResponse, data: unknown, status = 200) {
 
 export function sqlitePlugin(dbPath: string): Plugin {
   let db: import('sql.js').Database | null = null
+  let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+  function writeDb() {
+    if (!db) return
+    writeFileSync(dbPath, Buffer.from(db.export()))
+  }
+
+  // Batches rapid writes into a single disk write after a short idle period.
+  function scheduleFlush() {
+    if (flushTimer) clearTimeout(flushTimer)
+    flushTimer = setTimeout(() => { flushTimer = null; writeDb() }, 500)
+  }
+
+  function flushImmediate() {
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null }
+    writeDb()
+  }
 
   async function init() {
     // sql.js CJS module — handle default export interop
@@ -113,14 +129,14 @@ export function sqlitePlugin(dbPath: string): Plugin {
     // Add enabled columns to existing DBs that predate the schema change
     try { db.run('ALTER TABLE mapping_instance ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1') } catch {}
     try { db.run('ALTER TABLE list_values ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1') } catch {}
-    flush()
+    writeDb()
     console.log(`[sqlite] using ${dbPath}`)
   }
 
-  function flush() {
-    if (!db) return
-    writeFileSync(dbPath, Buffer.from(db.export()))
-  }
+  // Ensure in-flight debounced writes land before the process exits
+  process.on('exit', flushImmediate)
+  process.on('SIGINT', () => { flushImmediate(); process.exit(0) })
+  process.on('SIGTERM', () => { flushImmediate(); process.exit(0) })
 
   return {
     name: 'vite-plugin-sqlite',
@@ -147,7 +163,9 @@ export function sqlitePlugin(dbPath: string): Plugin {
             json(res, db.exec(body.sql, body.params as any))
           } else if (route === '/exec') {
             db.run(body.sql, body.params as any)
-            flush()
+            // Return immediately; flush to disk after a short debounce.
+            // Rapid writes (e.g. token_usage inserts) share one disk write.
+            scheduleFlush()
             json(res, { ok: true })
           } else {
             next()

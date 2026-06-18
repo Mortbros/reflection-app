@@ -14,8 +14,9 @@ import TimeDisplay from '@/components/fields/TimeDisplay.vue';
 import AutocompleteField from '@/components/fields/AutocompleteField.vue';
 import AutocompleteListField from '@/components/fields/AutocompleteListField.vue';
 import { getTodayDate, getYesterdayDate } from '@/lib/fieldUtils';
-import { getMappingInstances, getListValues, getSuggestions, upsertFormHistory, getAllAppSettings } from '@/lib/db';
+import { getMappingInstances, getListValues, getSuggestions, upsertFormHistory, getAllAppSettings, getAllRecentTokenUsage, recordTokenUsage } from '@/lib/db';
 import type { MappingInstance, ListValue } from '@/lib/db';
+import type { TokenUsageRow } from '@/lib/frecency';
 
 const router = useRouter();
 
@@ -33,7 +34,7 @@ const dbLoaded = ref(false);
 // Frecency / autocomplete settings loaded from app_settings
 const halfLifeDays = ref(7);
 const maxSuggestions = ref(5);
-const debounceMs = ref(80);
+const dbTokenUsage = ref<TokenUsageRow[]>([]);
 
 const loadDb = async () => {
   const [m, lv, ex, mu, ga, ph, settings] = await Promise.all([
@@ -53,8 +54,18 @@ const loadDb = async () => {
   dbPhaseSuggestions.value = ph;
   halfLifeDays.value = parseFloat(settings.frecency_halflife_days ?? '7') || 7;
   maxSuggestions.value = parseInt(settings.autocomplete_max_results ?? '5') || 5;
-  debounceMs.value = parseInt(settings.autocomplete_debounce_ms ?? '80') || 80;
   dbLoaded.value = true;
+
+  // Load token usage after core data so the form is usable immediately
+  const windowDays = halfLifeDays.value * 15;
+  dbTokenUsage.value = await getAllRecentTokenUsage(windowDays);
+};
+
+const onUsageRecorded = async (entry: { rawInput: string; mappingName: string | null; expansion: string }) => {
+  // Optimistic update — the dropdown sees the new row immediately on next accept
+  const row: TokenUsageRow = { raw_input: entry.rawInput, mapping_name: entry.mappingName, expansion: entry.expansion, used_at: new Date().toISOString() };
+  dbTokenUsage.value = [row, ...dbTokenUsage.value];
+  await recordTokenUsage(entry.rawInput, entry.mappingName, entry.expansion);
 };
 
 // Form data
@@ -508,8 +519,10 @@ onMounted(async () => {
 
               <PatternTextField ref="happenedRef" v-model="formData.happened" label="Happened" :required="true"
                 :mappings="dbMappings" :list-values="dbListValues"
-                :half-life-days="halfLifeDays" :max-suggestions="maxSuggestions" :debounce-ms="debounceMs"
-                :on-next="focusRules['happened']" :on-previous="prevRules['happened']" />
+                :half-life-days="halfLifeDays" :max-suggestions="maxSuggestions"
+                :token-usage="dbTokenUsage"
+                :on-next="focusRules['happened']" :on-previous="prevRules['happened']"
+                @usage-recorded="onUsageRecorded" />
               <VBtn size="small" variant="outlined" @click="formRefs.happened.value?.capitalize()">
                 Capitalize
               </VBtn>

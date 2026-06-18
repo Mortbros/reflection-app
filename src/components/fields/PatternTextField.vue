@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onUnmounted } from 'vue';
+import { ref, computed, nextTick } from 'vue';
 import { VTextarea, VList, VListItem, VListItemTitle, VListItemSubtitle, VChip } from 'vuetify/components';
 import getCaretCoordinates from 'textarea-caret';
 import type { MappingInstance, ListValue } from '@/lib/db';
-import { recordTokenUsage, getTokenUsageForPrefix } from '@/lib/db';
-import { expandToken } from '@/lib/patternMatcher';
+import { findAllMatches, expandToken } from '@/lib/patternMatcher';
 import { scoreFrecency } from '@/lib/frecency';
-import type { FrecencySuggestion } from '@/lib/frecency';
+import type { TokenUsageRow, FrecencySuggestion } from '@/lib/frecency';
 
 interface Suggestion {
-  kind: 'frecency' | 'mapping'
+  kind: 'pattern' | 'frecency' | 'mapping'
   rawInput: string
   mappingName: string | null
   expansion: string
@@ -25,11 +24,12 @@ const props = defineProps<{
   listValues?: ListValue[]
   halfLifeDays?: number
   maxSuggestions?: number
-  debounceMs?: number
+  tokenUsage?: TokenUsageRow[]
 }>();
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
+  'usage-recorded': [entry: { rawInput: string; mappingName: string | null; expansion: string }]
 }>();
 
 const textareaRef = ref<InstanceType<typeof VTextarea> | null>(null);
@@ -74,18 +74,35 @@ const updateDropdownPos = () => {
   }
 };
 
+// ── Highlight ─────────────────────────────────────────────────────────────────
+
+const escHtml = (t: string) =>
+  t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** Wraps the first occurrence of `query` in `text` with <u> tags (case-insensitive). */
+const highlight = (text: string, query: string): string => {
+  if (!query) return escHtml(text);
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return escHtml(text);
+  return (
+    escHtml(text.slice(0, idx)) +
+    '<u>' + escHtml(text.slice(idx, idx + query.length)) + '</u>' +
+    escHtml(text.slice(idx + query.length))
+  );
+};
+
 // ── Ranking ───────────────────────────────────────────────────────────────────
 
 /**
- * Ranks suggestions by how well they match the token.
  * Tiers (higher = better):
- *   400+ expansion starts with token (frecency: +score bonus)
- *   350   expansion starts with token (mapping fallback)
- *   300+  raw_input/name starts with token (frecency: +score bonus)
- *   250   name starts with token (mapping fallback)
+ *   500   exact pattern match (mudmt → Mum drove me to …)
+ *   400+  expansion starts with token (frecency + bonus)
+ *   350   expansion starts with token (mapping)
+ *   300+  raw_input starts with token (frecency + bonus)
+ *   250   name starts with token (mapping)
  *   200+  expansion contains token (frecency)
  *   150   expansion contains token (mapping)
- *   100+  raw_input/name contains token (frecency)
+ *   100+  raw_input contains token (frecency)
  *    50   name contains token (mapping)
  */
 const rankSuggestions = (
@@ -103,16 +120,23 @@ const rankSuggestions = (
     if (!seen.has(s.expansion)) { seen.add(s.expansion); ranked.push({ ...s, rank }); }
   };
 
+  // Tier 1: exact pattern matches (highest priority — the "mudmt" case)
+  for (const { mapping, expansion } of findAllMatches(token, mappingList, props.listValues ?? [])) {
+    add({ kind: 'pattern', rawInput: token, mappingName: mapping.name, expansion }, 500);
+  }
+
+  // Tier 2: frecency history
   for (const f of frecency) {
     const expL = f.expansion.toLowerCase();
     const rawL = f.rawInput.toLowerCase();
-    const bonus = Math.min(f.score * 10, 90); // cap bonus so tier order is preserved
-    if (expL.startsWith(lower))       add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 400 + bonus);
-    else if (rawL.startsWith(lower))  add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 300 + bonus);
-    else if (expL.includes(lower))    add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 200 + bonus);
-    else if (rawL.includes(lower))    add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 100 + bonus);
+    const bonus = Math.min(f.score * 10, 90);
+    if (expL.startsWith(lower))      add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 400 + bonus);
+    else if (rawL.startsWith(lower)) add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 300 + bonus);
+    else if (expL.includes(lower))   add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 200 + bonus);
+    else if (rawL.includes(lower))   add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 100 + bonus);
   }
 
+  // Tier 3: mapping text fallbacks
   for (const m of mappingList) {
     if (!m.enabled) continue;
     const expL = m.expansion.toLowerCase();
@@ -126,37 +150,34 @@ const rankSuggestions = (
   return ranked.sort((a, b) => b.rank - a.rank).slice(0, max);
 };
 
-// ── Fetch suggestions ─────────────────────────────────────────────────────────
-
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+// ── Fetch suggestions (synchronous — data pre-loaded by parent) ───────────────
 
 const fetchSuggestions = (token: string) => {
-  if (debounceTimer) clearTimeout(debounceTimer);
   if (!token || !shortcutMode.value) { suggestions.value = []; return; }
 
-  debounceTimer = setTimeout(async () => {
-    const halfLife = props.halfLifeDays ?? 7;
-    const max = props.maxSuggestions ?? 5;
-    const windowDays = halfLife * 15;
+  const halfLife = props.halfLifeDays ?? 7;
+  const max = props.maxSuggestions ?? 5;
+  const windowDays = halfLife * 15;
+  const cutoff = Date.now() - windowDays * 86_400_000;
 
-    const rows = await getTokenUsageForPrefix(token, windowDays);
-    const scored = scoreFrecency(rows, halfLife);
+  const rows = (props.tokenUsage ?? []).filter(
+    r => new Date(r.used_at).getTime() >= cutoff
+  );
+  const scored = scoreFrecency(rows, halfLife);
 
-    suggestions.value = rankSuggestions(token, scored, props.mappings ?? [], max);
-    selectedIndex.value = -1;
-  }, props.debounceMs ?? 80);
+  suggestions.value = rankSuggestions(token, scored, props.mappings ?? [], max);
+  selectedIndex.value = -1;
 };
 
 const clearDropdown = () => {
   suggestions.value = [];
   selectedIndex.value = -1;
   dropdownPos.value = null;
-  if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
 };
 
-onUnmounted(() => { if (debounceTimer) clearTimeout(debounceTimer); });
-
 // ── Accept suggestion ─────────────────────────────────────────────────────────
+
+const currentToken = ref('');
 
 const acceptSuggestion = async (suggestion: Suggestion) => {
   const textarea = getTextarea();
@@ -171,8 +192,11 @@ const acceptSuggestion = async (suggestion: Suggestion) => {
 
   value.value = prefix + suggestion.expansion + ' ' + after;
 
-  // Only record when the user explicitly accepts a suggestion from the dropdown
-  await recordTokenUsage(suggestion.rawInput, suggestion.mappingName, suggestion.expansion);
+  emit('usage-recorded', {
+    rawInput: suggestion.rawInput,
+    mappingName: suggestion.mappingName,
+    expansion: suggestion.expansion,
+  });
 
   clearDropdown();
   const newCursor = prefix.length + suggestion.expansion.length + 1;
@@ -197,7 +221,7 @@ const handleInput = async (event: Event): Promise<void> => {
   const cursor = textarea.selectionStart;
   value.value = val;
 
-  // Expand token on space (shortcut mode only) — no recording here
+  // Expand token on space (shortcut mode only)
   if (shortcutMode.value && val.slice(0, cursor).endsWith(' ')) {
     const tokens = val.slice(0, cursor).trimEnd().split(/\s+/);
     const lastToken = tokens[tokens.length - 1];
@@ -220,6 +244,7 @@ const handleInput = async (event: Event): Promise<void> => {
 
   // Update dropdown for current token
   const token = extractCurrentToken(val, cursor);
+  currentToken.value = token;
   if (token) {
     updateDropdownPos();
     fetchSuggestions(token);
@@ -320,12 +345,14 @@ defineExpose({ focus, capitalize });
           style="cursor: pointer"
           @click="acceptSuggestion(s)"
         >
-          <VListItemTitle class="text-body-2">{{ s.expansion }}</VListItemTitle>
+          <!-- eslint-disable-next-line vue/no-v-html -->
+          <VListItemTitle class="text-body-2" v-html="s.kind === 'pattern' ? escHtml(s.expansion) : highlight(s.expansion, currentToken)" />
           <VListItemSubtitle v-if="s.mappingName" class="text-caption text-disabled">
             {{ s.mappingName }}
           </VListItemSubtitle>
           <template #append>
             <VChip v-if="s.kind === 'frecency'" size="x-small" color="primary" variant="tonal">recent</VChip>
+            <VChip v-else-if="s.kind === 'pattern'" size="x-small" color="success" variant="tonal">match</VChip>
           </template>
         </VListItem>
       </VList>
