@@ -151,17 +151,13 @@ const genPatternPrefixCandidates = (
 // ── Ranking ───────────────────────────────────────────────────────────────────
 
 /**
- * Tiers (higher = better):
+ * Tiers (higher = better). Only shortcut names and pattern slot prefixes
+ * are matched — expansion text is never used as a match source.
+ *
  *   500   exact pattern match for full token (findAllMatches)
- *   400+  expansion starts with token (frecency + bonus)
- *   350   expansion starts with token (mapping template)
- *   340   pattern prefix candidate (e.g. "i" → "Izzy drove me to")
- *   300+  raw_input starts with token (frecency + bonus)
- *   250   name starts with token (mapping)
- *   200+  expansion contains token (frecency)
- *   150   expansion contains token (mapping)
- *   100+  raw_input contains token (frecency)
- *    50   name contains token (mapping)
+ *   400   literal mapping name starts with token
+ *   300   pattern prefix candidate (e.g. "i" or "id" → "Izzy drove me to")
+ *   200+  frecency: raw_input starts with token (+ recency bonus, cap 90)
  */
 const rankSuggestions = (
   token: string,
@@ -184,32 +180,25 @@ const rankSuggestions = (
     add({ kind: 'pattern', rawInput: token, mappingName: mapping.name, expansion }, 500);
   }
 
-  // Tier 2: frecency history
-  for (const f of frecency) {
-    const expL = f.expansion.toLowerCase();
-    const rawL = f.rawInput.toLowerCase();
-    const bonus = Math.min(f.score * 10, 90);
-    if (expL.startsWith(lower))      add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 400 + bonus);
-    else if (rawL.startsWith(lower)) add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 300 + bonus);
-    else if (expL.includes(lower))   add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 200 + bonus);
-    else if (rawL.includes(lower))   add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 100 + bonus);
-  }
-
-  // Tier 3a: mapping text fallbacks (literal parts)
+  // Tier 2: literal mapping name starts with typed token
   for (const m of mappingList) {
-    if (!m.enabled) continue;
-    const expL = m.expansion.toLowerCase();
-    const nameL = m.name.toLowerCase();
-    if (expL.startsWith(lower))       add({ kind: 'mapping', rawInput: token, mappingName: m.name, expansion: m.expansion }, 350);
-    else if (nameL.startsWith(lower)) add({ kind: 'mapping', rawInput: token, mappingName: m.name, expansion: m.expansion }, 250);
-    else if (expL.includes(lower))    add({ kind: 'mapping', rawInput: token, mappingName: m.name, expansion: m.expansion }, 150);
-    else if (nameL.includes(lower))   add({ kind: 'mapping', rawInput: token, mappingName: m.name, expansion: m.expansion }, 50);
+    if (!m.enabled || m.name.includes('<')) continue;
+    if (m.name.toLowerCase().startsWith(lower)) {
+      add({ kind: 'mapping', rawInput: token, mappingName: m.name, expansion: m.expansion }, 400);
+    }
   }
 
-  // Tier 3b: pattern prefix candidates — surfaces single-slot pattern mappings
-  // while typing the abbreviation prefix (e.g. "i" or "id" → "Izzy drove me to")
+  // Tier 3: pattern prefix candidates (e.g. typing "i" or "id" → "Izzy drove me to")
   for (const { mappingName, expansion } of genPatternPrefixCandidates(token, mappingList, lvList)) {
-    add({ kind: 'mapping', rawInput: token, mappingName, expansion }, 340);
+    add({ kind: 'mapping', rawInput: token, mappingName, expansion }, 300);
+  }
+
+  // Tier 4: frecency fallback — raw_input starts with typed token
+  for (const f of frecency) {
+    if (f.rawInput.toLowerCase().startsWith(lower)) {
+      const bonus = Math.min(f.score * 10, 90);
+      add({ kind: 'frecency', rawInput: f.rawInput, mappingName: f.mappingName, expansion: f.expansion }, 200 + bonus);
+    }
   }
 
   return ranked.sort((a, b) => b.rank - a.rank).slice(0, max);
