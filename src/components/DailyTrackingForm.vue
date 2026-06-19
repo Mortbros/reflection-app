@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, type Ref, onMounted, onUnmounted, nextTick, watch, useTemplateRef } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick, watch, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
 import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip, VProgressLinear } from 'vuetify/components';
 import DateField from '@/components/fields/DateField.vue';
@@ -77,11 +77,11 @@ const formData = ref({
   worked: 0,
   stress: 0,
   tired: 0,
-  game: [] as string[],
-  music: [] as string[],
+  game: ['N'] as string[],
+  music: ['N'] as string[],
   grateful: [] as string[],
   learn: [] as string[],
-  exercise: [] as string[],
+  exercise: ['N'] as string[],
   remember: 0,
   dayRating: 0,
   feeling: 0,
@@ -100,9 +100,12 @@ const loadFormData = () => {
       if (!Array.isArray(parsed.grateful)) parsed.grateful = [];
       if (!Array.isArray(parsed.learn)) parsed.learn = [];
       if (!Array.isArray(parsed.phase)) parsed.phase = [];
-      if (!Array.isArray(parsed.game)) parsed.game = parsed.game && parsed.game !== 'N' ? [parsed.game] : [];
-      if (!Array.isArray(parsed.music)) parsed.music = parsed.music && parsed.music !== 'N' ? [parsed.music] : [];
-      if (!Array.isArray(parsed.exercise)) parsed.exercise = parsed.exercise && parsed.exercise !== 'N' ? [parsed.exercise] : [];
+      if (!Array.isArray(parsed.game)) parsed.game = parsed.game && parsed.game !== 'N' ? [parsed.game] : ['N'];
+      if (!Array.isArray(parsed.music)) parsed.music = parsed.music && parsed.music !== 'N' ? [parsed.music] : ['N'];
+      if (!Array.isArray(parsed.exercise)) parsed.exercise = parsed.exercise && parsed.exercise !== 'N' ? [parsed.exercise] : ['N'];
+      if (Array.isArray(parsed.game) && parsed.game.length === 0) parsed.game = ['N'];
+      if (Array.isArray(parsed.music) && parsed.music.length === 0) parsed.music = ['N'];
+      if (Array.isArray(parsed.exercise) && parsed.exercise.length === 0) parsed.exercise = ['N'];
       Object.assign(formData.value, parsed);
     }
   } catch (err) {
@@ -123,24 +126,17 @@ watch(() => formData.value.grateful, saveFormData, { deep: true });
 watch(() => formData.value.learn, saveFormData, { deep: true });
 watch(() => formData.value.phase, saveFormData, { deep: true });
 
-// Auto-add newly typed game/music/exercise values to list_values if they aren't suggestions yet
-const autoAddToSuggestions = async (
-  newItems: string[],
-  oldItems: string[],
-  suggestionsList: { value: Ref<string[]>; typeId: string }
-) => {
-  if (!dbLoaded.value) return;
-  const added = newItems.filter(v => v && !oldItems.includes(v));
-  for (const v of added) {
-    if (!suggestionsList.value.value.includes(v)) {
-      suggestionsList.value.value = [...suggestionsList.value.value, v];
-      insertListValue(v, suggestionsList.typeId).catch(console.error);
+/** On form submit, persist any new values to list_values (silently, no wait). */
+const persistNewListValues = (items: string[], existing: string[], typeId: string, existingRef: { value: string[] }) => {
+  const SKIP = ['N', 'n', ''];
+  for (const v of items) {
+    if (SKIP.includes(v.trim())) continue;
+    if (!existing.includes(v)) {
+      existingRef.value = [...existingRef.value, v];
+      insertListValue(v, typeId).catch(console.error);
     }
   }
 };
-watch(() => formData.value.game, (n, o) => autoAddToSuggestions(n, o ?? [], { value: dbGameSuggestions, typeId: 'game' }), { deep: true });
-watch(() => formData.value.music, (n, o) => autoAddToSuggestions(n, o ?? [], { value: dbMusicSuggestions, typeId: 'music' }), { deep: true });
-watch(() => formData.value.exercise, (n, o) => autoAddToSuggestions(n, o ?? [], { value: dbExerciseSuggestions, typeId: 'exercise' }), { deep: true });
 
 watch(() => formData.value.time, (newTime) => {
   if (newTime) {
@@ -166,11 +162,11 @@ const clearForm = () => {
     worked: 0,
     stress: 0,
     tired: 0,
-    game: [],
-    music: [],
+    game: ['N'],
+    music: ['N'],
     grateful: [],
     learn: [],
-    exercise: [],
+    exercise: ['N'],
     remember: 0,
     dayRating: 0,
     feeling: 0,
@@ -379,6 +375,12 @@ const copyToClipboard = async () => {
     }
     copySuccess.value = true;
     setTimeout(() => { copySuccess.value = false; }, 2000);
+
+    // Persist any newly typed values to list_values on submit
+    persistNewListValues(formData.value.game, dbGameSuggestions.value, 'game', dbGameSuggestions);
+    persistNewListValues(formData.value.music, dbMusicSuggestions.value, 'music', dbMusicSuggestions);
+    persistNewListValues(formData.value.exercise, dbExerciseSuggestions.value, 'exercise', dbExerciseSuggestions);
+    persistNewListValues(formData.value.phase, dbPhaseSuggestions.value, 'phase', dbPhaseSuggestions);
 
     // Persist to history (fire-and-forget — don't block the copy UX)
     if (formData.value.date) {

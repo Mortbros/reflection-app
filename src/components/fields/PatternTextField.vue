@@ -69,8 +69,14 @@ const updateDropdownPos = () => {
     const wrapperRect = wrapperRef.value.getBoundingClientRect();
     dropdownPos.value = {
       top: (textareaRect.top - wrapperRect.top) + coords.top + coords.height - textarea.scrollTop,
-      // Anchor to textarea left edge so the dropdown always has full width available
-      left: textareaRect.left - wrapperRect.left,
+      // Follow cursor but clamp within textarea bounds so the dropdown is always readable
+      left: (() => {
+        const DROPDOWN_WIDTH = 380;
+        const taLeft = textareaRect.left - wrapperRect.left;
+        const cursorLeft = taLeft + coords.left;
+        const maxLeft = taLeft + Math.max(0, textareaRect.width - DROPDOWN_WIDTH);
+        return Math.max(taLeft, Math.min(cursorLeft, maxLeft));
+      })(),
     };
   } catch {
     dropdownPos.value = null;
@@ -154,7 +160,11 @@ const resolveFromToken = (
         break;
       }
     }
-    if (!matched) break;
+    if (!matched) {
+      // Typed more characters than any slot abbreviation can explain — will never resolve
+      if (remaining.length > 0) return null;
+      break;
+    }
   }
 
   if (result === expansion) return null; // nothing was resolved
