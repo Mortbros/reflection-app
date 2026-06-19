@@ -484,6 +484,10 @@ const historySearch = ref('');
 
 const loadHistory = async () => { history.value = await withLoading(getFormHistory); };
 
+const historyViewItem = ref<FormHistoryRow | null>(null);
+const historyViewDialog = ref(false);
+const openHistoryView = (row: FormHistoryRow) => { historyViewItem.value = row; historyViewDialog.value = true; };
+
 // Load history when its tab is first activated
 watch(tab, (t) => { if (t === 'history' && !history.value.length) loadHistory(); });
 
@@ -687,10 +691,6 @@ const computeConflicts = () => {
   conflictsLoaded.value = true;
 };
 
-watch(tab, (t) => {
-  if (t === 'conflicts') computeConflicts();
-});
-
 // ── Test / Debugger ───────────────────────────────────────────────────────────
 
 const testInput = ref('');
@@ -839,7 +839,7 @@ watch(tab, async (t) => {
                   style="max-width: 320px" />
               </div>
               <VDataTable :headers="historyHeaders" :items="history" :search="historySearch" density="compact"
-                :items-per-page="-1" hover @click:row="(_: any, { item }: any) => restoreToForm(item)"
+                :items-per-page="-1" hover @click:row="(_: any, { item }: any) => openHistoryView(item)"
                 style="cursor: pointer">
                 <template #item.happened="{ item }">
                   <span :title="item.happened"
@@ -1105,6 +1105,49 @@ watch(tab, async (t) => {
         <VBtn variant="text" @click="importDialog = false">Cancel</VBtn>
         <VBtn color="primary" :disabled="!importParsedRows.length" :loading="importLoading" @click="runImport">Import
         </VBtn>
+      </div>
+    </VCard>
+  </VDialog>
+
+  <!-- History view dialog -->
+  <VDialog v-model="historyViewDialog" max-width="640" scrollable>
+    <VCard v-if="historyViewItem">
+      <VCardText class="pa-4">
+        <div class="text-h6 mb-4">{{ historyViewItem.date }}</div>
+        <VRow dense>
+          <VCol v-for="[label, val] in ([
+            ['Bathe', historyViewItem.bathe],
+            ['Wake', historyViewItem.wake],
+            ['Sleep', historyViewItem.sleep],
+            ['Nap', historyViewItem.nap],
+            ['Worked', historyViewItem.worked],
+            ['Stress', historyViewItem.stress],
+            ['Tired', historyViewItem.tired],
+            ['Game', historyViewItem.game],
+            ['Music', historyViewItem.music],
+            ['Grateful', historyViewItem.grateful],
+            ['Learn', historyViewItem.learn],
+            ['Exercise', historyViewItem.exercise],
+            ['Remember', historyViewItem.remember],
+            ['Day rating', historyViewItem.day_rating],
+            ['Feeling', historyViewItem.feeling],
+            ['Why', historyViewItem.why],
+            ['Phase', historyViewItem.phase],
+            ['Time', historyViewItem.time],
+            ['Happened', historyViewItem.happened],
+            ['Day name', historyViewItem.day_name],
+          ] as [string, string][])" :key="label" cols="12" sm="6">
+            <div class="text-caption text-disabled font-weight-medium">{{ label.toUpperCase() }}</div>
+            <div class="text-body-2 mb-2" style="white-space: pre-wrap; word-break: break-word;">{{ val || '—' }}</div>
+          </VCol>
+        </VRow>
+      </VCardText>
+      <div class="d-flex justify-end align-center ga-2 pa-4 pt-0">
+        <VBtn size="small" variant="tonal" prepend-icon="mdi-restore"
+          @click="restoreToForm(historyViewItem); historyViewDialog = false">
+          Restore to form
+        </VBtn>
+        <VBtn size="small" variant="text" @click="historyViewDialog = false">Close</VBtn>
       </div>
     </VCard>
   </VDialog>

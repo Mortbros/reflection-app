@@ -3,7 +3,7 @@ import { ref, computed, nextTick } from 'vue';
 import { VTextarea, VList, VListItem, VListItemTitle, VListItemSubtitle, VChip } from 'vuetify/components';
 import getCaretCoordinates from 'textarea-caret';
 import type { MappingInstance, ListValue } from '@/lib/db';
-import { findAllMatches, expandToken } from '@/lib/patternMatcher';
+import { findAllMatches } from '@/lib/patternMatcher';
 import { scoreFrecency } from '@/lib/frecency';
 import type { TokenUsageRow, FrecencySuggestion } from '@/lib/frecency';
 
@@ -69,7 +69,8 @@ const updateDropdownPos = () => {
     const wrapperRect = wrapperRef.value.getBoundingClientRect();
     dropdownPos.value = {
       top: (textareaRect.top - wrapperRect.top) + coords.top + coords.height - textarea.scrollTop,
-      left: (textareaRect.left - wrapperRect.left) + coords.left,
+      // Anchor to textarea left edge so the dropdown always has full width available
+      left: textareaRect.left - wrapperRect.left,
     };
   } catch {
     dropdownPos.value = null;
@@ -160,7 +161,7 @@ const resolveFromToken = (
 
   const stillHasSlots = /<\w+,?>/.test(result);
   return {
-    resolved: result.replace(/<\w+,?>/g, '…'),
+    resolved: result,
     complete: !stillHasSlots,
   };
 };
@@ -274,6 +275,30 @@ const rankSuggestions = (
   return ranked.sort((a, b) => b.rank - a.rank).slice(0, max);
 };
 
+// ── Frecency-aware expansion ──────────────────────────────────────────────────
+
+/**
+ * Expands a token using frecency to break ties when multiple mappings match.
+ * Returns { expansion, mappingName } or null if no match.
+ */
+const expandWithFrecency = (token: string): { expansion: string; mappingName: string } | null => {
+  const matches = findAllMatches(token, props.mappings ?? [], props.listValues ?? []);
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return { expansion: matches[0].expansion, mappingName: matches[0].mapping.name };
+
+  const halfLife = props.halfLifeDays ?? 7;
+  const scored = scoreFrecency(props.tokenUsage ?? [], halfLife);
+
+  let bestIdx = 0;
+  let bestScore = -1;
+  for (let i = 0; i < matches.length; i++) {
+    const s = scored.filter(f => f.mappingName === matches[i].mapping.name)
+      .reduce((max, f) => Math.max(max, f.score), 0);
+    if (s > bestScore) { bestScore = s; bestIdx = i; }
+  }
+  return { expansion: matches[bestIdx].expansion, mappingName: matches[bestIdx].mapping.name };
+};
+
 // ── Fetch suggestions (synchronous — data pre-loaded by parent) ───────────────
 
 const fetchSuggestions = (token: string) => {
@@ -352,13 +377,20 @@ const handleInput = async (event: Event): Promise<void> => {
     const tokens = val.slice(0, cursor).trimEnd().split(/\s+/);
     const lastToken = tokens[tokens.length - 1];
     if (lastToken) {
-      const expanded = expandToken(lastToken, props.mappings ?? [], props.listValues ?? []);
-      if (expanded !== null) {
+      const result = expandWithFrecency(lastToken);
+      if (result !== null) {
         const before = val.slice(0, cursor - lastToken.length - 1);
         const after = val.slice(cursor);
-        value.value = before + expanded + ' ' + after;
+        // Auto-capitalize if at the start of a sentence
+        const context = before.trimEnd();
+        const { expansion, mappingName } = result;
+        const display = (!context || /[.!?]$/.test(context))
+          ? expansion.charAt(0).toUpperCase() + expansion.slice(1)
+          : expansion;
+        value.value = before + display + ' ' + after;
+        emit('usage-recorded', { rawInput: lastToken, mappingName, expansion });
         clearDropdown();
-        const newCursor = before.length + expanded.length + 1;
+        const newCursor = before.length + display.length + 1;
         await nextTick();
         textarea.setSelectionRange(newCursor, newCursor);
         return;
@@ -469,8 +501,7 @@ defineExpose({ focus, capitalize });
         top: dropdownPos.top + 'px',
         left: dropdownPos.left + 'px',
         zIndex: 200,
-        width: '340px',
-        maxWidth: 'calc(100% - ' + dropdownPos.left + 'px)',
+        width: '380px',
       }"
       @mousedown.prevent
     >

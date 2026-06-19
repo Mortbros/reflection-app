@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch, useTemplateRef } from 'vue';
+import { ref, type Ref, onMounted, onUnmounted, nextTick, watch, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
-import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip } from 'vuetify/components';
+import { VContainer, VRow, VCol, VCard, VCardText, VBtn, VDivider, VChip, VProgressLinear } from 'vuetify/components';
 import DateField from '@/components/fields/DateField.vue';
 import YesNoField from '@/components/fields/YesNoField.vue';
 import TimeField from '@/components/fields/TimeField.vue';
@@ -11,10 +11,9 @@ import StringField from '@/components/fields/StringField.vue';
 import ListField from '@/components/fields/ListField.vue';
 import PatternTextField from '@/components/fields/PatternTextField.vue';
 import TimeDisplay from '@/components/fields/TimeDisplay.vue';
-import AutocompleteField from '@/components/fields/AutocompleteField.vue';
 import AutocompleteListField from '@/components/fields/AutocompleteListField.vue';
 import { getTodayDate, getYesterdayDate } from '@/lib/fieldUtils';
-import { getMappingInstances, getListValues, getSuggestions, upsertFormHistory, getAllAppSettings, getAllRecentTokenUsage, recordTokenUsage } from '@/lib/db';
+import { getMappingInstances, getListValues, getSuggestions, upsertFormHistory, getAllAppSettings, getAllRecentTokenUsage, recordTokenUsage, insertListValue } from '@/lib/db';
 import type { MappingInstance, ListValue } from '@/lib/db';
 import type { TokenUsageRow } from '@/lib/frecency';
 
@@ -78,11 +77,11 @@ const formData = ref({
   worked: 0,
   stress: 0,
   tired: 0,
-  game: 'N',
-  music: 'N',
+  game: [] as string[],
+  music: [] as string[],
   grateful: [] as string[],
   learn: [] as string[],
-  exercise: '',
+  exercise: [] as string[],
   remember: 0,
   dayRating: 0,
   feeling: 0,
@@ -101,6 +100,9 @@ const loadFormData = () => {
       if (!Array.isArray(parsed.grateful)) parsed.grateful = [];
       if (!Array.isArray(parsed.learn)) parsed.learn = [];
       if (!Array.isArray(parsed.phase)) parsed.phase = [];
+      if (!Array.isArray(parsed.game)) parsed.game = parsed.game && parsed.game !== 'N' ? [parsed.game] : [];
+      if (!Array.isArray(parsed.music)) parsed.music = parsed.music && parsed.music !== 'N' ? [parsed.music] : [];
+      if (!Array.isArray(parsed.exercise)) parsed.exercise = parsed.exercise && parsed.exercise !== 'N' ? [parsed.exercise] : [];
       Object.assign(formData.value, parsed);
     }
   } catch (err) {
@@ -120,6 +122,25 @@ watch(formData, saveFormData, { deep: true });
 watch(() => formData.value.grateful, saveFormData, { deep: true });
 watch(() => formData.value.learn, saveFormData, { deep: true });
 watch(() => formData.value.phase, saveFormData, { deep: true });
+
+// Auto-add newly typed game/music/exercise values to list_values if they aren't suggestions yet
+const autoAddToSuggestions = async (
+  newItems: string[],
+  oldItems: string[],
+  suggestionsList: { value: Ref<string[]>; typeId: string }
+) => {
+  if (!dbLoaded.value) return;
+  const added = newItems.filter(v => v && !oldItems.includes(v));
+  for (const v of added) {
+    if (!suggestionsList.value.value.includes(v)) {
+      suggestionsList.value.value = [...suggestionsList.value.value, v];
+      insertListValue(v, suggestionsList.typeId).catch(console.error);
+    }
+  }
+};
+watch(() => formData.value.game, (n, o) => autoAddToSuggestions(n, o ?? [], { value: dbGameSuggestions, typeId: 'game' }), { deep: true });
+watch(() => formData.value.music, (n, o) => autoAddToSuggestions(n, o ?? [], { value: dbMusicSuggestions, typeId: 'music' }), { deep: true });
+watch(() => formData.value.exercise, (n, o) => autoAddToSuggestions(n, o ?? [], { value: dbExerciseSuggestions, typeId: 'exercise' }), { deep: true });
 
 watch(() => formData.value.time, (newTime) => {
   if (newTime) {
@@ -145,11 +166,11 @@ const clearForm = () => {
     worked: 0,
     stress: 0,
     tired: 0,
-    game: 'N',
-    music: 'N',
+    game: [],
+    music: [],
     grateful: [],
     learn: [],
-    exercise: 'N',
+    exercise: [],
     remember: 0,
     dayRating: 0,
     feeling: 0,
@@ -174,11 +195,11 @@ const formRefs = {
   worked:    useTemplateRef<InstanceType<typeof FloatField>>('workedRef'),
   stress:    useTemplateRef<InstanceType<typeof FloatField>>('stressRef'),
   tired:     useTemplateRef<InstanceType<typeof FloatField>>('tiredRef'),
-  game:      useTemplateRef<InstanceType<typeof AutocompleteField>>('gameRef'),
-  music:     useTemplateRef<InstanceType<typeof AutocompleteField>>('musicRef'),
+  game:      useTemplateRef<InstanceType<typeof AutocompleteListField>>('gameRef'),
+  music:     useTemplateRef<InstanceType<typeof AutocompleteListField>>('musicRef'),
   grateful:  useTemplateRef<InstanceType<typeof ListField>>('gratefulRef'),
   learn:     useTemplateRef<InstanceType<typeof ListField>>('learnRef'),
-  exercise:  useTemplateRef<InstanceType<typeof AutocompleteField>>('exerciseRef'),
+  exercise:  useTemplateRef<InstanceType<typeof AutocompleteListField>>('exerciseRef'),
   remember:  useTemplateRef<InstanceType<typeof FloatField>>('rememberRef'),
   dayRating: useTemplateRef<InstanceType<typeof FloatField>>('dayRatingRef'),
   feeling:   useTemplateRef<InstanceType<typeof IntField>>('feelingRef'),
@@ -277,10 +298,10 @@ const validateForm = () => {
   if (!formData.value.sleep) e.push('Sleep');
   if (formData.value.stress < 1) e.push('Stress');
   if (formData.value.tired < 1) e.push('Tired');
-  if (!formData.value.music) e.push('Music');
+  if (!formData.value.music?.length) e.push('Music');
   if (!formData.value.grateful?.length) e.push('Grateful');
   if (!formData.value.learn?.length) e.push('Learn');
-  if (!formData.value.exercise) e.push('Exercise');
+  if (!formData.value.exercise?.length) e.push('Exercise');
   if (formData.value.remember < 1) e.push('Remember');
   if (formData.value.dayRating < 1) e.push('Day rating');
   if (formData.value.feeling < 1) e.push('Feeling');
@@ -326,11 +347,11 @@ const copyToClipboard = async () => {
     formData.value.worked,
     String(formData.value.stress),
     String(formData.value.tired),
-    formData.value.game,
-    formData.value.music,
+    formData.value.game.join(', ') || 'N',
+    formData.value.music.join(', ') || 'N',
     formData.value.grateful.join(', '),
     formData.value.learn.join(', '),
-    formData.value.exercise,
+    formData.value.exercise.join(', ') || 'N',
     String(formData.value.remember),
     String(formData.value.dayRating),
     String(formData.value.feeling),
@@ -370,11 +391,11 @@ const copyToClipboard = async () => {
         worked:    String(formData.value.worked),
         stress:    String(formData.value.stress),
         tired:     String(formData.value.tired),
-        game:      formData.value.game,
-        music:     formData.value.music,
+        game:      formData.value.game.join(', ') || 'N',
+        music:     formData.value.music.join(', ') || 'N',
         grateful:  formData.value.grateful.join(', '),
         learn:     formData.value.learn.join(', '),
-        exercise:  formData.value.exercise,
+        exercise:  formData.value.exercise.join(', ') || 'N',
         remember:  String(formData.value.remember),
         day_rating: String(formData.value.dayRating),
         feeling:   String(formData.value.feeling),
@@ -425,7 +446,8 @@ onMounted(async () => {
     <VRow justify="center">
       <VCol cols="12" md="10" lg="8" xl="6">
         <VCard variant="outlined" class="pa-6">
-          <VCardText>
+          <VProgressLinear v-if="!dbLoaded" indeterminate color="primary" height="2" />
+        <VCardText>
             <div class="d-flex flex-column ga-6">
               <div class="d-flex align-center ga-4 mb-4">
                 <div class="d-flex justify-center flex-wrap ga-4 flex-grow-1">
@@ -449,15 +471,16 @@ onMounted(async () => {
                 <VBtn size="small" variant="outlined" @click="setDateToToday">Today</VBtn>
               </div>
 
-              <YesNoField ref="batheRef" v-model="formData.bathe" label="Bathe" :required="true"
-                :on-next="focusRules['bathe']" :on-previous="prevRules['bathe']" />
-
               <VRow class="py-0">
-                <VCol class="pt-1 pb-0">
+                <VCol cols="12" sm="4" class="pt-1 pb-0">
+                  <YesNoField ref="batheRef" v-model="formData.bathe" label="Bathe" :required="true"
+                    :on-next="focusRules['bathe']" :on-previous="prevRules['bathe']" />
+                </VCol>
+                <VCol cols="12" sm="4" class="pt-1 pb-0">
                   <TimeField ref="wakeRef" v-model="formData.wake" label="Wake" :required="true"
                     :on-next="focusRules['wake']" :on-previous="prevRules['wake']" />
                 </VCol>
-                <VCol class="pt-1 pb-0">
+                <VCol cols="12" sm="4" class="pt-1 pb-0">
                   <TimeField ref="sleepRef" v-model="formData.sleep" label="Sleep" :default-to-future="true"
                     :future-minutes="25" :required="true"
                     :on-next="focusRules['sleep']" :on-previous="prevRules['sleep']" />
@@ -486,10 +509,10 @@ onMounted(async () => {
                 </VCol>
               </VRow>
 
-              <AutocompleteField ref="gameRef" v-model="formData.game" label="Game" :suggestions="dbGameSuggestions"
+              <AutocompleteListField ref="gameRef" v-model="formData.game" label="Game" :suggestions="dbGameSuggestions"
                 :required="false" :on-next="focusRules['game']" :on-previous="prevRules['game']" />
 
-              <AutocompleteField ref="musicRef" v-model="formData.music" label="Music"
+              <AutocompleteListField ref="musicRef" v-model="formData.music" label="Music"
                 :suggestions="dbMusicSuggestions" :required="true"
                 :on-next="focusRules['music']" :on-previous="prevRules['music']" />
 
@@ -499,7 +522,7 @@ onMounted(async () => {
               <ListField ref="learnRef" v-model="formData.learn" label="Learn (Ctrl+Y)" :required="true"
                 :on-next="focusRules['learn']" :on-previous="prevRules['learn']" />
 
-              <AutocompleteField ref="exerciseRef" v-model="formData.exercise" label="Exercise"
+              <AutocompleteListField ref="exerciseRef" v-model="formData.exercise" label="Exercise"
                 :suggestions="dbExerciseSuggestions" :required="true"
                 :on-next="focusRules['exercise']" :on-previous="prevRules['exercise']" />
 
