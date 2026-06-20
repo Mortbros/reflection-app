@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, nextTick } from 'vue';
-import { VCombobox, VChip } from 'vuetify/components';
+import { ref, watch, nextTick } from 'vue';
+import { VCombobox } from 'vuetify/components';
+import { focusInput } from '@/lib/fieldUtils';
 
 const props = defineProps<{
   modelValue: string[];
@@ -16,106 +17,108 @@ const emit = defineEmits<{
   'update:modelValue': [value: string[]];
 }>();
 
-const inputRef = ref<InstanceType<typeof VCombobox> | null>(null);
-const pending = ref('');
-
-// Only offer suggestions not already in the list
-const availableSuggestions = computed(() =>
-  props.suggestions.filter(s => !props.modelValue.includes(s))
-);
-
-const getInput = (): HTMLInputElement | null =>
-  inputRef.value?.$el?.querySelector('input') ?? null;
+const inputRefs = ref<(InstanceType<typeof VCombobox> | null)[]>([]);
+// One input per value; one empty input when list is empty so the field is usable
+const localItems = ref<string[]>(['']);
+const isInternalUpdate = ref(false);
 
 const focus = async () => {
   await nextTick();
-  const input = getInput();
+  const input = inputRefs.value[0]?.$el?.querySelector('input') as HTMLInputElement | null;
   if (!input) return;
   input.focus();
-  if (props.autoSelect !== false) {
-    await nextTick();
-    input.select();
-  }
+  if (props.autoSelect !== false) { await nextTick(); input.select(); }
 };
 defineExpose({ focus });
 
-const removeItem = (i: number) => {
-  const next = [...props.modelValue];
-  next.splice(i, 1);
-  emit('update:modelValue', next);
+// Sync from parent — no trailing empty added here (avoids the ghost field on reload)
+watch(() => props.modelValue, (newVal) => {
+  if (!isInternalUpdate.value) {
+    localItems.value = newVal?.length ? [...newVal] : [''];
+  }
+  isInternalUpdate.value = false;
+}, { immediate: true });
+
+const saveAll = () => {
+  const items = localItems.value.filter(v => v.trim() !== '');
+  isInternalUpdate.value = true;
+  emit('update:modelValue', items);
 };
 
-/**
- * Commits whatever is in the pending input as one or more chips.
- * Handles comma-separated input ("a, b, c" → three chips).
- * Returns true if anything was committed.
- */
-const commitPending = (): boolean => {
-  const raw = String(pending.value ?? '').trim();
-  if (!raw) return false;
-  const parts = raw.split(',').map(p => p.trim()).filter(Boolean);
-  if (!parts.length) return false;
-  emit('update:modelValue', [...props.modelValue, ...parts]);
-  nextTick(() => { pending.value = ''; });
-  return true;
+const updateItem = async (index: number, value: string) => {
+  // Handle comma-separated paste
+  if (value?.includes(',')) {
+    const parts = value.split(',').map(p => p.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      const before = localItems.value.slice(0, index);
+      const after = localItems.value.slice(index + 1);
+      localItems.value = [...before, ...parts, ...after];
+      saveAll();
+      await nextTick();
+      const focusIdx = index + parts.length - 1;
+      if (inputRefs.value[focusIdx]) await focusInput(inputRefs.value[focusIdx], 'input', false);
+      return;
+    }
+  }
+  localItems.value[index] = value ?? '';
+  saveAll();
 };
 
-const handleUpdate = (val: string | null) => {
-  pending.value = val ?? '';
-};
+const handleKeydown = async (e: KeyboardEvent, index: number) => {
+  const isLast = index === localItems.value.length - 1;
+  const currentVal = localItems.value[index]?.trim() ?? '';
 
-const handleKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Tab' && e.shiftKey) {
-    e.preventDefault();
-    commitPending();
-    props.onPrevious?.();
+    if (index === 0) { e.preventDefault(); saveAll(); props.onPrevious?.(); }
     return;
   }
+
   if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
-    const committed = commitPending();
     e.preventDefault();
-    if (!committed) {
-      // Nothing to commit — advance to next field
+    if (!isLast) {
+      // Move to next input in list
+      await nextTick();
+      inputRefs.value[index + 1]?.$el?.querySelector('input')?.focus();
+      return;
+    }
+    // On the last input
+    if (currentVal) {
+      // Commit value and open a new empty input below
+      saveAll();
+      localItems.value = [...localItems.value.filter((_, i) => i <= index), ''];
+      await nextTick();
+      await focusInput(inputRefs.value[localItems.value.length - 1], 'input', false);
+    } else {
+      // Last input is empty — advance to next form field
+      saveAll();
       props.onNext?.();
     }
-    // If something was committed, stay so user can add another item
   }
 };
 
-const handleBlur = () => { commitPending(); };
+const handleBlur = () => { saveAll(); };
 </script>
 
 <template>
-  <div>
-    <!-- Committed items as chips -->
-    <div v-if="modelValue.length" class="d-flex flex-wrap align-center ga-1 mb-1 px-1">
-      <VChip
-        v-for="(item, i) in modelValue"
-        :key="i"
-        size="small"
-        closable
-        variant="tonal"
-        @click:close="removeItem(i)"
-      >{{ item }}</VChip>
+  <div class="list-field">
+    <div v-for="(_, index) in localItems" :key="index" :class="index > 0 ? 'mt-2' : ''">
+      <VCombobox
+        :ref="(el) => { if (el) inputRefs[index] = el as InstanceType<typeof VCombobox> }"
+        :model-value="localItems[index]"
+        :label="index === 0 ? label : ''"
+        :placeholder="index > 0 ? 'Add another…' : undefined"
+        :items="suggestions"
+        variant="outlined"
+        density="comfortable"
+        class="text-h6"
+        hide-details
+        spellcheck="true"
+        autocomplete="off"
+        clearable
+        @update:model-value="updateItem(index, $event)"
+        @keydown="handleKeydown($event, index)"
+        @blur="handleBlur"
+      />
     </div>
-
-    <!-- Input for adding new items -->
-    <VCombobox
-      ref="inputRef"
-      :model-value="pending"
-      :label="label"
-      :placeholder="modelValue.length ? 'Add another…' : undefined"
-      :items="availableSuggestions"
-      variant="outlined"
-      density="comfortable"
-      class="text-h6"
-      hide-details
-      spellcheck="true"
-      autocomplete="off"
-      clearable
-      @update:model-value="handleUpdate"
-      @keydown="handleKeydown"
-      @blur="handleBlur"
-    />
   </div>
 </template>
