@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
-import { VCombobox } from 'vuetify/components';
-import { focusInput } from '@/lib/fieldUtils';
+import { ref, computed, nextTick } from 'vue';
+import { VCombobox, VChip } from 'vuetify/components';
 
 const props = defineProps<{
   modelValue: string[];
@@ -17,143 +16,106 @@ const emit = defineEmits<{
   'update:modelValue': [value: string[]];
 }>();
 
-const inputRefs = ref<(InstanceType<typeof VCombobox> | null)[]>([]);
-const localItems = ref<string[]>(['']);
-const isInternalUpdate = ref(false);
+const inputRef = ref<InstanceType<typeof VCombobox> | null>(null);
+const pending = ref('');
+
+// Only offer suggestions not already in the list
+const availableSuggestions = computed(() =>
+  props.suggestions.filter(s => !props.modelValue.includes(s))
+);
+
+const getInput = (): HTMLInputElement | null =>
+  inputRef.value?.$el?.querySelector('input') ?? null;
 
 const focus = async () => {
   await nextTick();
-  if (inputRefs.value.length > 0 && inputRefs.value[0]) {
-    const input = inputRefs.value[0].$el.querySelector('input') as HTMLInputElement;
-    if (input) {
-      input.focus();
-      await nextTick();
-      if (props.autoSelect !== false) {
-        input.select();
-      }
-    }
+  const input = getInput();
+  if (!input) return;
+  input.focus();
+  if (props.autoSelect !== false) {
+    await nextTick();
+    input.select();
   }
 };
-
 defineExpose({ focus });
 
-watch(() => props.modelValue, (newVal) => {
-  if (!isInternalUpdate.value) {
-    if (!newVal || newVal.length === 0) {
-      localItems.value = [''];
-    } else {
-      localItems.value = [...newVal, ''];
-    }
+const removeItem = (i: number) => {
+  const next = [...props.modelValue];
+  next.splice(i, 1);
+  emit('update:modelValue', next);
+};
+
+/**
+ * Commits whatever is in the pending input as one or more chips.
+ * Handles comma-separated input ("a, b, c" → three chips).
+ * Returns true if anything was committed.
+ */
+const commitPending = (): boolean => {
+  const raw = String(pending.value ?? '').trim();
+  if (!raw) return false;
+  const parts = raw.split(',').map(p => p.trim()).filter(Boolean);
+  if (!parts.length) return false;
+  emit('update:modelValue', [...props.modelValue, ...parts]);
+  nextTick(() => { pending.value = ''; });
+  return true;
+};
+
+const handleUpdate = (val: string | null) => {
+  pending.value = val ?? '';
+};
+
+const handleKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Tab' && e.shiftKey) {
+    e.preventDefault();
+    commitPending();
+    props.onPrevious?.();
+    return;
   }
-  isInternalUpdate.value = false;
-}, { immediate: true });
-
-const handleKeydown = async (event: KeyboardEvent, index: number) => {
-  if (event.key === 'Enter' && event.ctrlKey) {
-    event.preventDefault();
-    const currentValue = localItems.value[index]?.trim() || '';
-    const itemsToSave = localItems.value.slice(0, -1).filter(item => item.trim() !== '');
-    if (currentValue) {
-      itemsToSave.push(currentValue);
-    }
-    isInternalUpdate.value = true;
-    emit('update:modelValue', itemsToSave);
-
-    localItems.value = [...itemsToSave, ''];
-    await nextTick();
-    const newIndex = itemsToSave.length;
-    if (inputRefs.value[newIndex]) {
-      await focusInput(inputRefs.value[newIndex], 'input', false);
-    }
-  } else if ((event.key === 'Enter' && !event.shiftKey && !event.ctrlKey) || (event.key === 'Tab' && !event.shiftKey)) {
-    event.preventDefault();
-
-    if (index < localItems.value.length - 1) {
-      await nextTick();
-      const nextRef = inputRefs.value[index + 1];
-      if (nextRef?.$el) {
-        nextRef.$el.querySelector('input')?.focus();
-      }
-    } else {
-      const itemsToSave = localItems.value.slice(0, -1).filter(item => item.trim() !== '');
-      isInternalUpdate.value = true;
-      emit('update:modelValue', itemsToSave);
+  if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+    const committed = commitPending();
+    e.preventDefault();
+    if (!committed) {
+      // Nothing to commit — advance to next field
       props.onNext?.();
     }
-  } else if (event.key === 'Tab' && event.shiftKey && index === 0) {
-    event.preventDefault();
-    props.onPrevious?.();
+    // If something was committed, stay so user can add another item
   }
 };
 
-const updateItem = async (index: number, value: string) => {
-  // Check if value contains a comma
-  if (value && value.includes(',')) {
-    const parts = value.split(',').map(p => p.trim()).filter(p => p !== '');
-    if (parts.length > 1) {
-      // Split the current item and add new items
-      const beforeItems = localItems.value.slice(0, index);
-      const afterItems = localItems.value.slice(index + 1);
-      const newItems = [...beforeItems, parts[0], ...parts.slice(1).filter(p => p !== ''), ...afterItems];
-      localItems.value = newItems as string[];
-
-      // Update model value
-      const itemsToSave = localItems.value.filter((item, idx) => {
-        if (idx === localItems.value.length - 1 && item.trim() === '') {
-          return false;
-        }
-        return item.trim() !== '';
-      });
-      isInternalUpdate.value = true;
-      emit('update:modelValue', itemsToSave);
-
-      // Focus on the next field after the last added item
-      await nextTick();
-      const nextIndex = index + parts.length - 1;
-      if (inputRefs.value[nextIndex]) {
-        await focusInput(inputRefs.value[nextIndex], 'input', false);
-      }
-      return;
-    }
-  }
-
-  if (index >= localItems.value.length) {
-    localItems.value = [...localItems.value, ...Array(index - localItems.value.length + 1).fill('')];
-  }
-  localItems.value[index] = value || '';
-  // Update model value (excluding the last empty field if it exists)
-  const itemsToSave = localItems.value.filter((item, idx) => {
-    if (idx === localItems.value.length - 1 && item.trim() === '') {
-      return false; // Don't save the trailing empty field
-    }
-    return item.trim() !== '';
-  });
-  isInternalUpdate.value = true;
-  emit('update:modelValue', itemsToSave);
-};
-
-// Handle blur event to ensure values are saved when user clicks away
-const handleBlur = (index: number) => {
-  // When a field loses focus, ensure its value is saved
-  const itemsToSave = localItems.value.filter((item, idx) => {
-    if (idx === localItems.value.length - 1 && item.trim() === '') {
-      return false; // Don't save the trailing empty field
-    }
-    return item.trim() !== '';
-  });
-  isInternalUpdate.value = true;
-  emit('update:modelValue', itemsToSave);
-};
+const handleBlur = () => { commitPending(); };
 </script>
 
 <template>
-  <div class="list-field">
-    <div v-for="(item, index) in localItems" :key="index" class="mb-2">
-      <VCombobox :ref="(el) => { if (el) inputRefs[index] = el as InstanceType<typeof VCombobox> }"
-        :model-value="localItems[index]" :label="index === 0 ? label : ''" :items="suggestions" variant="outlined"
-        density="comfortable" class="text-h6" hide-details spellcheck="true" autocomplete="off" clearable
-        @update:model-value="updateItem(index, $event)" @keydown="handleKeydown($event, index)"
-        @blur="handleBlur(index)" />
+  <div>
+    <!-- Committed items as chips -->
+    <div v-if="modelValue.length" class="d-flex flex-wrap align-center ga-1 mb-1 px-1">
+      <VChip
+        v-for="(item, i) in modelValue"
+        :key="i"
+        size="small"
+        closable
+        variant="tonal"
+        @click:close="removeItem(i)"
+      >{{ item }}</VChip>
     </div>
+
+    <!-- Input for adding new items -->
+    <VCombobox
+      ref="inputRef"
+      :model-value="pending"
+      :label="label"
+      :placeholder="modelValue.length ? 'Add another…' : undefined"
+      :items="availableSuggestions"
+      variant="outlined"
+      density="comfortable"
+      class="text-h6"
+      hide-details
+      spellcheck="true"
+      autocomplete="off"
+      clearable
+      @update:model-value="handleUpdate"
+      @keydown="handleKeydown"
+      @blur="handleBlur"
+    />
   </div>
 </template>
