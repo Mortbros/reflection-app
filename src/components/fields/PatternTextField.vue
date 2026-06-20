@@ -253,16 +253,25 @@ const rankSuggestions = (
     if (!seen.has(s.expansion)) { seen.add(s.expansion); ranked.push({ ...s, rank }); }
   };
 
+  // Frecency bonus for a mapping name — higher recent usage → higher rank within a tier.
+  // Capped at 90 so tiers (100 apart) never overlap.
+  const frecencyBonus = (mappingName: string): number => {
+    const s = frecency
+      .filter(f => f.mappingName === mappingName)
+      .reduce((max, f) => Math.max(max, f.score), 0);
+    return Math.min(s * 10, 90);
+  };
+
   // Tier 1: exact pattern match (full token resolves a pattern)
   for (const { mapping, expansion } of findAllMatches(token, mappingList, lvList)) {
-    add({ kind: 'pattern', rawInput: token, mappingName: mapping.name, expansion }, 500);
+    add({ kind: 'pattern', rawInput: token, mappingName: mapping.name, expansion }, 500 + frecencyBonus(mapping.name));
   }
 
   // Tier 2: literal mapping name starts with typed token
   for (const m of mappingList) {
     if (!m.enabled || m.name.includes('<')) continue;
     if (m.name.toLowerCase().startsWith(lower)) {
-      add({ kind: 'mapping', rawInput: token, mappingName: m.name, expansion: m.expansion }, 400);
+      add({ kind: 'mapping', rawInput: token, mappingName: m.name, expansion: m.expansion }, 400 + frecencyBonus(m.name));
     }
   }
 
@@ -270,7 +279,7 @@ const rankSuggestions = (
   for (const { mappingName, expansion, complete } of genPatternPrefixCandidates(token, mappingList, lvList)) {
     add(
       { kind: complete ? 'mapping' : 'hint', rawInput: token, mappingName, expansion },
-      complete ? 300 : 280,
+      complete ? 300 + frecencyBonus(mappingName) : 280,
     );
   }
 
