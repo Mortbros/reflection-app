@@ -562,22 +562,19 @@ const loadAppSettings = async () => {
 };
 
 /**
- * Analyses form_history.happened to find tokens that never matched a mapping.
- * Runs in the background — does not block the UI.
+ * Analyses form_history.happened to find sentences that appear frequently
+ * across past submissions. These are good candidates for new shortcut mappings.
  */
 const loadSuggestions = async () => {
   const threshold = parseInt(appSettings.value.suggestion_threshold ?? '3') || 3;
-  const minLen = parseInt(appSettings.value.suggestion_min_length ?? '4') || 4;
+  const minLen = parseInt(appSettings.value.suggestion_min_length ?? '10') || 10;
   const happened = await withLoading(getFormHistoryHappenedTexts);
-  const enabledMappings = mappings.value.filter(m => m.enabled);
-  const enabledListValues = listValues.value.filter(v => v.enabled);
   const counts = new Map<string, number>();
   for (const text of happened) {
-    for (const token of text.split(/\s+/)) {
-      if (token.length < minLen) continue;
-      if (expandToken(token, enabledMappings, enabledListValues) === null) {
-        counts.set(token, (counts.get(token) ?? 0) + 1);
-      }
+    // Split into sentences on . ! ? followed by optional whitespace
+    const sentences = text.split(/[.!?]+\s*/).map(s => s.trim()).filter(s => s.length >= minLen);
+    for (const sentence of sentences) {
+      counts.set(sentence, (counts.get(sentence) ?? 0) + 1);
     }
   }
   suggestions.value = [...counts.entries()]
@@ -590,7 +587,7 @@ const loadSuggestions = async () => {
 const settingKeys = [
   { key: 'frecency_halflife_days',   label: 'Frecency half-life (days)',      hint: 'Score halves every N days. Lower = recency matters more.' },
   { key: 'suggestion_threshold',     label: 'Suggestion threshold (uses)',     hint: 'Minimum times an unmapped phrase must appear before it shows here.' },
-  { key: 'suggestion_min_length',    label: 'Min token length for suggestions', hint: 'Unmapped tokens shorter than this are not tracked as candidates.' },
+  { key: 'suggestion_min_length',    label: 'Min sentence length for suggestions', hint: 'Sentences shorter than this many characters are not tracked as candidates.' },
   { key: 'token_usage_max_rows',     label: 'Max usage rows stored',           hint: 'Oldest rows pruned automatically when this limit is exceeded.' },
   { key: 'autocomplete_max_results', label: 'Autocomplete max results',        hint: 'Maximum suggestions shown in the dropdown.' },
 ] as const;
@@ -609,8 +606,9 @@ watch(tab, async (t) => {
 });
 
 // Pre-fill mapping dialog from a suggestion
-const openAddMappingFromSuggestion = (rawInput: string) => {
-  mappingForm.value = { id: null, name: rawInput, expansion: '', addBase: false };
+const openAddMappingFromSuggestion = (sentence: string) => {
+  // Sentence is the expansion text — leave the mapping name for the user to fill in
+  mappingForm.value = { id: null, name: '', expansion: sentence, addBase: false };
   mappingDialog.value = true;
   tab.value = 'mappings';
 };

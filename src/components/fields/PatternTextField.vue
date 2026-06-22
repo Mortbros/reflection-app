@@ -262,9 +262,11 @@ const rankSuggestions = (
     return Math.min(s * 10, 90);
   };
 
-  // Tier 1: exact pattern match (full token resolves a pattern)
+  // Tier 1a (600): literal exact match — always above everything else
+  // Tier 1b (500): regex / pattern exact match (frecency breaks ties within)
   for (const { mapping, expansion } of findAllMatches(token, mappingList, lvList)) {
-    add({ kind: 'pattern', rawInput: token, mappingName: mapping.name, expansion }, 500 + frecencyBonus(mapping.name));
+    const rank = isLiteralMapping(mapping.name) ? 600 : 500 + frecencyBonus(mapping.name);
+    add({ kind: 'pattern', rawInput: token, mappingName: mapping.name, expansion }, rank);
   }
 
   // Tier 2: literal mapping name starts with typed token
@@ -300,9 +302,16 @@ const rankSuggestions = (
  * Expands a token using frecency to break ties when multiple mappings match.
  * Returns { expansion, mappingName } or null if no match.
  */
+const isLiteralMapping = (name: string) =>
+  !name.includes('<') && !(name.startsWith('/') && name.lastIndexOf('/') > 0);
+
 const expandWithFrecency = (token: string): { expansion: string; mappingName: string } | null => {
   const matches = findAllMatches(token, props.mappings ?? [], props.listValues ?? []);
   if (matches.length === 0) return null;
+  // Literal exact match always wins — findAllMatches puts them first
+  if (isLiteralMapping(matches[0].mapping.name)) {
+    return { expansion: matches[0].expansion, mappingName: matches[0].mapping.name };
+  }
   if (matches.length === 1) return { expansion: matches[0].expansion, mappingName: matches[0].mapping.name };
 
   const halfLife = props.halfLifeDays ?? 7;

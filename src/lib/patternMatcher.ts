@@ -202,77 +202,89 @@ function expandValue(template: string, matchedSlots: MatchedSlot[]): string {
  * Returns every mapping that matches the given token, along with its expansion.
  * Used for conflict detection and the test/debugger tab.
  */
+const isLiteralKey = (key: string) =>
+  !key.includes('<') && !(key.startsWith('/') && key.lastIndexOf('/') > 0)
+
+const isRegexKey = (key: string) =>
+  key.startsWith('/') && key.lastIndexOf('/') > 0
+
+/**
+ * Returns every mapping that matches the given token, along with its expansion.
+ * Literal matches are always returned first (before regex, before pattern),
+ * so callers that take the first result get the literal winner without needing
+ * to sort themselves.
+ */
 export function findAllMatches(
   token: string,
   mappings: MappingInstance[],
   listValues: ListValue[],
 ): { mapping: MappingInstance; expansion: string }[] {
-  const results: { mapping: MappingInstance; expansion: string }[] = []
+  const literals: { mapping: MappingInstance; expansion: string }[] = []
+  const regexes: { mapping: MappingInstance; expansion: string }[] = []
+  const patterns: { mapping: MappingInstance; expansion: string }[] = []
+
   for (const rule of mappings) {
     const key = rule.name.trim()
     if (!key) continue
-    const hasSlot = key.includes('<')
-    if (hasSlot) {
+
+    if (isLiteralKey(key)) {
+      if (key === token) literals.push({ mapping: rule, expansion: rule.expansion })
+    } else if (isRegexKey(key)) {
+      try {
+        const lastSlash = key.lastIndexOf('/')
+        const pat = key.slice(1, lastSlash)
+        const flags = key.slice(lastSlash + 1)
+        if (new RegExp(`^${pat}$`, flags).test(token)) {
+          regexes.push({ mapping: rule, expansion: rule.expansion })
+        }
+      } catch { continue }
+    } else {
       const result = matchPattern(token, key, listValues)
       if (result.matched) {
-        results.push({ mapping: rule, expansion: expandValue(rule.expansion, result.matchedSlots) })
-      }
-    } else {
-      const isRegex = key.startsWith('/') && key.lastIndexOf('/') > 0
-      if (isRegex) {
-        try {
-          const lastSlash = key.lastIndexOf('/')
-          const pattern = key.slice(1, lastSlash)
-          const flags = key.slice(lastSlash + 1)
-          if (new RegExp(`^${pattern}$`, flags).test(token)) {
-            results.push({ mapping: rule, expansion: rule.expansion })
-          }
-        } catch { continue }
-      } else if (key === token) {
-        results.push({ mapping: rule, expansion: rule.expansion })
+        patterns.push({ mapping: rule, expansion: expandValue(rule.expansion, result.matchedSlots) })
       }
     }
   }
-  return results
+
+  return [...literals, ...regexes, ...patterns]
 }
 
 /**
  * Attempts to expand a single token against the provided mapping rules.
  * Returns the expanded string or null if no match.
  */
+/**
+ * Expands a token, checking literal → regex → pattern in that order.
+ * A literal exact match always wins regardless of mapping list order.
+ */
 export function expandToken(
   token: string,
   mappings: MappingInstance[],
   listValues: ListValue[],
 ): string | null {
+  // Phase 1: literal
   for (const rule of mappings) {
     const key = rule.name.trim()
-    if (!key) continue
-
-    const hasSlot = key.includes('<')
-    if (hasSlot) {
-      const result = matchPattern(token, key, listValues)
-      if (result.matched) {
-        return expandValue(rule.expansion, result.matchedSlots)
+    if (!key || !isLiteralKey(key)) continue
+    if (key === token) return rule.expansion
+  }
+  // Phase 2: regex
+  for (const rule of mappings) {
+    const key = rule.name.trim()
+    if (!key || !isRegexKey(key)) continue
+    try {
+      const lastSlash = key.lastIndexOf('/')
+      if (new RegExp(`^${key.slice(1, lastSlash)}$`, key.slice(lastSlash + 1)).test(token)) {
+        return rule.expansion
       }
-      continue
-    }
-
-    const isRegex = key.startsWith('/') && key.lastIndexOf('/') > 0
-    if (isRegex) {
-      try {
-        const lastSlash = key.lastIndexOf('/')
-        const pattern = key.slice(1, lastSlash)
-        const flags = key.slice(lastSlash + 1)
-        if (new RegExp(`^${pattern}$`, flags).test(token)) {
-          return rule.expansion
-        }
-      } catch {
-        // skip invalid regex
-      }
-    } else if (key === token) {
-      return rule.expansion
-    }
+    } catch { continue }
+  }
+  // Phase 3: pattern
+  for (const rule of mappings) {
+    const key = rule.name.trim()
+    if (!key || !key.includes('<')) continue
+    const result = matchPattern(token, key, listValues)
+    if (result.matched) return expandValue(rule.expansion, result.matchedSlots)
   }
   return null
 }
