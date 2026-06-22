@@ -569,12 +569,19 @@ const loadSuggestions = async () => {
   const threshold = parseInt(appSettings.value.suggestion_threshold ?? '3') || 3;
   const minLen = parseInt(appSettings.value.suggestion_min_length ?? '10') || 10;
   const happened = await withLoading(getFormHistoryHappenedTexts);
+  // Any sentence that exactly matches an existing mapping's expansion is already covered
+  const knownExpansions = new Set(
+    mappings.value.filter(m => m.enabled).map(m => m.expansion.trim())
+  );
+
   const counts = new Map<string, number>();
   for (const text of happened) {
     // Split into sentences on . ! ? followed by optional whitespace
     const sentences = text.split(/[.!?]+\s*/).map(s => s.trim()).filter(s => s.length >= minLen);
     for (const sentence of sentences) {
-      counts.set(sentence, (counts.get(sentence) ?? 0) + 1);
+      if (!knownExpansions.has(sentence)) {
+        counts.set(sentence, (counts.get(sentence) ?? 0) + 1);
+      }
     }
   }
   suggestions.value = [...counts.entries()]
