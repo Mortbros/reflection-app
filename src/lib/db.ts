@@ -6,6 +6,7 @@ export interface MappingInstance {
   name: string
   expansion: string
   enabled: boolean
+  grp: string
 }
 
 export interface ListValue {
@@ -56,28 +57,36 @@ function toObjects<T>(results: SqlJsResult): T[] {
 
 // ── Mapping instances ────────────────────────────────────────────────────────
 
-export async function getMappingInstances(onlyEnabled = false): Promise<MappingInstance[]> {
-  const sql = onlyEnabled
-    ? 'SELECT id, name, expansion, enabled FROM mapping_instance WHERE enabled = 1 ORDER BY name'
-    : 'SELECT id, name, expansion, enabled FROM mapping_instance ORDER BY name'
-  const rows = toObjects<{ id: number; name: string; expansion: string; enabled: number }>(
-    await query(sql)
+export async function getMappingInstances(onlyEnabled = false, group?: string): Promise<MappingInstance[]> {
+  let sql: string
+  let params: unknown[] | undefined
+  if (onlyEnabled && group) {
+    sql = "SELECT id, name, expansion, enabled, grp FROM mapping_instance WHERE enabled = 1 AND (grp = ? OR grp = 'all') ORDER BY name"
+    params = [group]
+  } else if (onlyEnabled) {
+    sql = 'SELECT id, name, expansion, enabled, grp FROM mapping_instance WHERE enabled = 1 ORDER BY name'
+  } else {
+    sql = 'SELECT id, name, expansion, enabled, grp FROM mapping_instance ORDER BY name'
+  }
+  const rows = toObjects<{ id: number; name: string; expansion: string; enabled: number; grp: string }>(
+    await query(sql, params)
   )
   return rows.map(r => ({ ...r, enabled: r.enabled !== 0 }))
 }
 
-export async function insertMappingInstance(name: string, expansion: string): Promise<void> {
+export async function insertMappingInstance(name: string, expansion: string, grp = 'main'): Promise<void> {
   await exec(
-    'INSERT INTO mapping_instance (name, expansion) VALUES (?, ?)',
-    [name, expansion]
+    'INSERT INTO mapping_instance (name, expansion, grp) VALUES (?, ?, ?)',
+    [name, expansion, grp]
   )
 }
 
-export async function updateMappingInstance(id: number, name: string, expansion: string): Promise<void> {
-  await exec(
-    'UPDATE mapping_instance SET name = ?, expansion = ? WHERE id = ?',
-    [name, expansion, id]
-  )
+export async function updateMappingInstance(id: number, name: string, expansion: string, grp?: string): Promise<void> {
+  if (grp !== undefined) {
+    await exec('UPDATE mapping_instance SET name = ?, expansion = ?, grp = ? WHERE id = ?', [name, expansion, grp, id])
+  } else {
+    await exec('UPDATE mapping_instance SET name = ?, expansion = ? WHERE id = ?', [name, expansion, id])
+  }
 }
 
 export async function deleteMappingInstance(id: number): Promise<void> {
@@ -223,6 +232,8 @@ export interface FormHistoryRow {
   day_name: string
   output: string
   saved_at: string
+  responses?: string | null
+  schema_version_id?: number | null
 }
 
 export async function upsertFormHistory(row: FormHistoryRow): Promise<void> {
@@ -230,8 +241,8 @@ export async function upsertFormHistory(row: FormHistoryRow): Promise<void> {
     `INSERT INTO form_history
        (date, bathe, wake, sleep, nap, worked, stress, tired, game, music,
         grateful, learn, exercise, remember, day_rating, feeling, why, phase,
-        time, happened, day_name, output, saved_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        time, happened, day_name, output, saved_at, responses, schema_version_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(date) DO UPDATE SET
        bathe=excluded.bathe, wake=excluded.wake, sleep=excluded.sleep,
        nap=excluded.nap, worked=excluded.worked, stress=excluded.stress,
@@ -240,12 +251,14 @@ export async function upsertFormHistory(row: FormHistoryRow): Promise<void> {
        remember=excluded.remember, day_rating=excluded.day_rating,
        feeling=excluded.feeling, why=excluded.why, phase=excluded.phase,
        time=excluded.time, happened=excluded.happened, day_name=excluded.day_name,
-       output=excluded.output, saved_at=excluded.saved_at`,
+       output=excluded.output, saved_at=excluded.saved_at,
+       responses=excluded.responses, schema_version_id=excluded.schema_version_id`,
     [
       row.date, row.bathe, row.wake, row.sleep, row.nap, row.worked,
       row.stress, row.tired, row.game, row.music, row.grateful, row.learn,
       row.exercise, row.remember, row.day_rating, row.feeling, row.why,
       row.phase, row.time, row.happened, row.day_name, row.output, row.saved_at,
+      row.responses ?? null, row.schema_version_id ?? null,
     ]
   )
 }
@@ -323,5 +336,76 @@ export async function getAllAppSettings(): Promise<Record<string, string>> {
 
 export async function setAppSetting(key: string, value: string): Promise<void> {
   await exec('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)', [key, value])
+}
+
+// ── Form schema ───────────────────────────────────────────────────────────────
+
+export interface FormSchemaVersion {
+  id: number
+  effective_from: string
+  note: string | null
+}
+
+export interface FormSchemaField {
+  id: number
+  version_id: number
+  field_key: string
+  label: string
+  field_type: string
+  config: Record<string, unknown> | null
+  row_group: number | null
+  sort_order: number
+}
+
+export async function getFormSchemaVersions(): Promise<FormSchemaVersion[]> {
+  return toObjects(await query('SELECT id, effective_from, note FROM form_schema_version ORDER BY effective_from DESC'))
+}
+
+/** Returns the schema version active on the given date (latest effective_from <= date). */
+export async function getActiveSchemaVersion(date: string): Promise<FormSchemaVersion | null> {
+  const rows = toObjects<FormSchemaVersion>(await query(
+    "SELECT id, effective_from, note FROM form_schema_version WHERE effective_from <= ? ORDER BY effective_from DESC LIMIT 1",
+    [date]
+  ))
+  return rows[0] ?? null
+}
+
+export async function getSchemaFields(versionId: number): Promise<FormSchemaField[]> {
+  const rows = toObjects<{ id: number; version_id: number; field_key: string; label: string; field_type: string; config: string | null; row_group: number | null; sort_order: number }>(
+    await query(
+      'SELECT id, version_id, field_key, label, field_type, config, row_group, sort_order FROM form_schema_field WHERE version_id = ? ORDER BY sort_order',
+      [versionId]
+    )
+  )
+  return rows.map(r => ({
+    ...r,
+    config: r.config ? JSON.parse(r.config) : null,
+  }))
+}
+
+export async function upsertSchemaVersion(effectiveFrom: string, note: string): Promise<number> {
+  await exec(
+    'INSERT INTO form_schema_version (effective_from, note) VALUES (?, ?) ON CONFLICT(effective_from) DO UPDATE SET note = excluded.note',
+    [effectiveFrom, note]
+  )
+  const rows = toObjects<{ id: number }>(await query(
+    'SELECT id FROM form_schema_version WHERE effective_from = ?', [effectiveFrom]
+  ))
+  return rows[0]!.id
+}
+
+export async function deleteSchemaVersion(id: number): Promise<void> {
+  await exec('DELETE FROM form_schema_field WHERE version_id = ?', [id])
+  await exec('DELETE FROM form_schema_version WHERE id = ?', [id])
+}
+
+export async function replaceSchemaFields(versionId: number, fields: Omit<FormSchemaField, 'id' | 'version_id'>[]): Promise<void> {
+  await exec('DELETE FROM form_schema_field WHERE version_id = ?', [versionId])
+  for (const f of fields) {
+    await exec(
+      'INSERT INTO form_schema_field (version_id, field_key, label, field_type, config, row_group, sort_order) VALUES (?,?,?,?,?,?,?)',
+      [versionId, f.field_key, f.label, f.field_type, f.config ? JSON.stringify(f.config) : null, f.row_group, f.sort_order]
+    )
+  }
 }
 

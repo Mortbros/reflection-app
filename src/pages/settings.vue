@@ -3,7 +3,7 @@ import { ref, watch, computed, onMounted, useTemplateRef, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   VContainer, VCard, VCardText, VTabs, VTab, VTabsWindow, VTabsWindowItem,
-  VDataTable, VBtn, VDialog, VTextField, VCheckbox, VSelect, VSnackbar, VAlert, VFileInput,
+  VDataTable, VBtn, VDialog, VTextField, VCheckbox, VSelect, VCombobox, VSnackbar, VAlert, VFileInput,
   VChip, VDivider, VProgressLinear,
 } from 'vuetify/components';
 import {
@@ -14,8 +14,10 @@ import {
   countMappingsUsingType, renameMappingTypeId,
   getFormHistory, deleteFormHistoryRow,
   getFormHistoryHappenedTexts, getAllAppSettings, setAppSetting,
+  getFormSchemaVersions, getSchemaFields, upsertSchemaVersion, deleteSchemaVersion, replaceSchemaFields,
 } from '@/lib/db';
-import type { MappingInstance, ListValue, MappingType, FormHistoryRow } from '@/lib/db';
+import type { MappingInstance, ListValue, MappingType, FormHistoryRow, FormSchemaVersion, FormSchemaField } from '@/lib/db';
+import { parseYaml, schemaToYaml, yamlFieldsToDb } from '@/lib/formSchema';
 import { findAllMatches, expandToken } from '@/lib/patternMatcher';
 
 type Focusable = { focus(): void }
@@ -78,8 +80,8 @@ function extractTypeSlots(str: string): { typeId: string; multiple: boolean }[] 
 }
 
 const mappingDialog = ref(false);
-const mappingForm = ref<{ id: number | null; name: string; expansion: string; addBase: boolean }>({
-  id: null, name: '', expansion: '', addBase: false,
+const mappingForm = ref<{ id: number | null; name: string; expansion: string; grp: string; addBase: boolean }>({
+  id: null, name: '', expansion: '', grp: 'main', addBase: false,
 });
 
 const mappingNameRef = useTemplateRef<Focusable>('mappingNameRef');
@@ -102,29 +104,29 @@ const copyNameToExpansion = () => {
 };
 
 const openAddMapping = () => {
-  mappingForm.value = { id: null, name: '', expansion: '', addBase: false };
+  mappingForm.value = { id: null, name: '', expansion: '', grp: 'main', addBase: false };
   mappingDialog.value = true;
 };
 
 const openEditMapping = (row: MappingInstance) => {
-  mappingForm.value = { id: row.id, name: row.name, expansion: row.expansion, addBase: false };
+  mappingForm.value = { id: row.id, name: row.name, expansion: row.expansion, grp: row.grp, addBase: false };
   mappingDialog.value = true;
 };
 
 const saveMapping = async () => {
-  const { id, name, expansion, addBase } = mappingForm.value;
+  const { id, name, expansion, grp, addBase } = mappingForm.value;
   if (!name.trim() || !expansion.trim()) return;
   if (id === null) {
-    await insertMappingInstance(name.trim(), expansion.trim());
+    await insertMappingInstance(name.trim(), expansion.trim(), grp || 'main');
     if (addBase) {
       const baseName = name.trim().replace(/<[^>]*>/g, '').trim();
       const baseExpansion = expansion.trim().replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
       if (baseName && baseName !== name.trim() && baseExpansion) {
-        await insertMappingInstance(baseName, baseExpansion).catch(() => { });
+        await insertMappingInstance(baseName, baseExpansion, grp || 'main').catch(() => { });
       }
     }
   } else {
-    await updateMappingInstance(id, name.trim(), expansion.trim());
+    await updateMappingInstance(id, name.trim(), expansion.trim(), grp || 'main');
   }
   mappingDialog.value = false;
   await refresh();
@@ -719,7 +721,66 @@ watch(tab, async (t) => {
     await nextTick();
     testInputRef.value?.focus();
   }
+  if (t === 'schema') loadSchemaVersions();
 });
+
+// ── Schema tab ────────────────────────────────────────────────────────────────
+
+const schemaVersions = ref<FormSchemaVersion[]>([]);
+const schemaYaml = ref('');
+const schemaYamlError = ref('');
+const schemaSelectedVersionId = ref<number | null>(null);
+const schemaFields = ref<FormSchemaField[]>([]);
+
+const loadSchemaVersions = async () => {
+  await withLoading(async () => {
+    schemaVersions.value = await getFormSchemaVersions();
+    if (schemaVersions.value.length > 0 && schemaSelectedVersionId.value === null) {
+      await selectSchemaVersion(schemaVersions.value[0].id);
+    }
+  });
+};
+
+const selectSchemaVersion = async (id: number) => {
+  schemaSelectedVersionId.value = id;
+  const version = schemaVersions.value.find(v => v.id === id);
+  if (!version) return;
+  schemaFields.value = await getSchemaFields(id);
+  schemaYaml.value = schemaToYaml(version.effective_from, version.note ?? '', schemaFields.value);
+  schemaYamlError.value = '';
+};
+
+const applySchemaYaml = async () => {
+  schemaYamlError.value = '';
+  try {
+    const parsed = parseYaml(schemaYaml.value);
+    const versionId = await upsertSchemaVersion(parsed.effective_from, parsed.note ?? '');
+    const dbFields = yamlFieldsToDb(parsed.fields);
+    await replaceSchemaFields(versionId, dbFields);
+    await loadSchemaVersions();
+    await selectSchemaVersion(versionId);
+    notify('Schema saved');
+  } catch (e: unknown) {
+    schemaYamlError.value = e instanceof Error ? e.message : String(e);
+  }
+};
+
+const addNewSchemaVersion = () => {
+  const nextYear = new Date().getFullYear() + 1;
+  schemaYaml.value = `effective_from: '${nextYear}-01-01'\nnote: '${nextYear} reflection'\nfields:\n  - key: date\n    label: Date\n    type: date\n`;
+  schemaYamlError.value = '';
+  schemaSelectedVersionId.value = null;
+};
+
+const deleteSchemaVersionConfirm = async (id: number) => {
+  if (!confirm('Delete this schema version? This cannot be undone.')) return;
+  await withLoading(async () => {
+    await deleteSchemaVersion(id);
+    schemaSelectedVersionId.value = null;
+    schemaYaml.value = '';
+    await loadSchemaVersions();
+  });
+};
 </script>
 
 <template>
@@ -744,6 +805,7 @@ watch(tab, async (t) => {
           <VTab value="test">Test</VTab>
           <VTab value="suggestions">Suggestions</VTab>
           <VTab value="appSettings">Frecency</VTab>
+          <VTab value="schema">Schema</VTab>
         </VTabs>
 
         <VCardText class="pa-2 pa-sm-3">
@@ -1001,6 +1063,66 @@ watch(tab, async (t) => {
               </div>
             </VTabsWindowItem>
 
+            <!-- ── Schema ────────────────────────────────────────────────── -->
+            <VTabsWindowItem value="schema">
+              <div class="d-flex ga-4" style="min-height: 480px;">
+
+                <!-- Version list -->
+                <div style="width: 200px; flex-shrink: 0;">
+                  <div class="text-subtitle-2 mb-2">Versions</div>
+                  <div v-for="v in schemaVersions" :key="v.id"
+                    class="pa-2 rounded cursor-pointer mb-1"
+                    :style="schemaSelectedVersionId === v.id ? 'background: rgba(var(--v-theme-primary), 0.12)' : ''"
+                    @click="selectSchemaVersion(v.id)">
+                    <div class="text-body-2 font-weight-medium">{{ v.effective_from }}</div>
+                    <div class="text-caption text-medium-emphasis">{{ v.note }}</div>
+                  </div>
+                  <div class="d-flex flex-column ga-1 mt-2">
+                    <VBtn size="small" variant="tonal" prepend-icon="mdi-plus" @click="addNewSchemaVersion">
+                      New version
+                    </VBtn>
+                    <VBtn v-if="schemaSelectedVersionId !== null" size="small" variant="tonal" color="error"
+                      prepend-icon="mdi-delete"
+                      @click="deleteSchemaVersionConfirm(schemaSelectedVersionId!)">
+                      Delete
+                    </VBtn>
+                  </div>
+                </div>
+
+                <!-- YAML editor -->
+                <div class="flex-grow-1 d-flex flex-column ga-2">
+                  <div class="d-flex align-center ga-2">
+                    <span class="text-subtitle-2">YAML</span>
+                    <VBtn size="small" color="primary" @click="applySchemaYaml">Apply</VBtn>
+                  </div>
+                  <VAlert v-if="schemaYamlError" type="error" density="compact" class="mb-1">
+                    {{ schemaYamlError }}
+                  </VAlert>
+                  <textarea
+                    v-model="schemaYaml"
+                    spellcheck="false"
+                    style="flex:1; min-height:400px; font-family:monospace; font-size:13px; padding:10px; border:1px solid rgba(var(--v-border-color),var(--v-border-opacity)); border-radius:4px; background:transparent; color:inherit; resize:vertical;"
+                  />
+
+                  <!-- Field preview table -->
+                  <div class="text-subtitle-2 mt-2">Fields in this version</div>
+                  <VDataTable
+                    :headers="[
+                      { title: 'Key', key: 'field_key' },
+                      { title: 'Label', key: 'label' },
+                      { title: 'Type', key: 'field_type' },
+                      { title: 'Row group', key: 'row_group' },
+                      { title: 'Order', key: 'sort_order' },
+                    ]"
+                    :items="schemaFields"
+                    density="compact"
+                    hide-default-footer
+                    :items-per-page="-1"
+                  />
+                </div>
+              </div>
+            </VTabsWindowItem>
+
           </VTabsWindow>
         </VCardText>
       </VCard>
@@ -1023,6 +1145,12 @@ watch(tab, async (t) => {
           <VBtn v-if="!mappingForm.expansion && mappingForm.name" size="small" variant="tonal"
             title="Copy name to expansion" @click="copyNameToExpansion">Copy</VBtn>
         </div>
+        <VCombobox v-model="mappingForm.grp"
+          :items="['main', 'all']"
+          label="Group"
+          density="compact"
+          hide-details
+        />
         <VCheckbox v-if="mappingForm.id === null" v-model="mappingForm.addBase"
           label="Also add base (e.g. 'tt<person>' will also add 'tt')" density="compact" hide-details />
       </VCardText>
