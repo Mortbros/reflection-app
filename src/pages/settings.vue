@@ -495,38 +495,32 @@ watch(tab, (t) => { if (t === 'history' && !history.value.length) loadHistory();
 
 const historyHeaders: TableHeader[] = [
   { title: 'Date', key: 'date', width: '120px' },
-  { title: 'Rating', key: 'day_rating', width: '80px' },
-  { title: 'Exercise', key: 'exercise', width: '160px' },
-  { title: 'Happened', key: 'happened' },
+  { title: 'Saved', key: 'saved_at', width: '160px' },
+  { title: 'Happened', key: '_happened' },
   { title: '', key: 'actions', sortable: false, align: 'end', width: '96px' },
 ];
 
+/** Parse the responses JSON for a history row, returning an empty object on failure. */
+function parseResponses(row: FormHistoryRow): Record<string, unknown> {
+  if (!row.responses) return {}
+  try { return JSON.parse(row.responses) } catch { return {} }
+}
+
+/** Format a camelCase/snake_case field key into a readable label. */
+function formatFieldKey(key: string): string {
+  return key
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/_/g, ' ')
+    .replace(/^\w/, c => c.toUpperCase())
+    .trim()
+}
+
 const restoreToForm = (row: FormHistoryRow) => {
-  const formData = {
-    date: row.date,
-    bathe: row.bathe,
-    wake: row.wake,
-    sleep: row.sleep,
-    nap: parseFloat(row.nap) || 0,
-    worked: parseFloat(row.worked) || 0,
-    stress: parseFloat(row.stress) || 0,
-    tired: parseFloat(row.tired) || 0,
-    game: row.game,
-    music: row.music,
-    grateful: row.grateful ? row.grateful.split(', ').filter(Boolean) : [],
-    learn: row.learn ? row.learn.split(', ').filter(Boolean) : [],
-    exercise: row.exercise,
-    remember: parseFloat(row.remember) || 0,
-    dayRating: parseFloat(row.day_rating) || 0,
-    feeling: parseInt(row.feeling) || 0,
-    why: row.why,
-    phase: row.phase ? row.phase.split(', ').filter(Boolean) : [],
-    time: row.time,
-    happened: row.happened,
-    dayName: row.day_name,
-  };
-  localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(formData));
-  router.push('/');
+  if (!row.responses) return
+  // Write the responses JSON directly — DailyTrackingForm.loadFormData handles
+  // any string→array conversion needed for old migrated rows.
+  localStorage.setItem(FORM_STORAGE_KEY, row.responses)
+  router.push('/')
 };
 
 const copyHistoryRow = async (row: FormHistoryRow) => {
@@ -908,10 +902,10 @@ const deleteSchemaVersionConfirm = async (id: number) => {
               <VDataTable :headers="historyHeaders" :items="history" :search="historySearch" density="compact"
                 :items-per-page="-1" hover @click:row="(_: any, { item }: any) => openHistoryView(item)"
                 style="cursor: pointer">
-                <template #item.happened="{ item }">
-                  <span :title="item.happened"
+                <template #item._happened="{ item }">
+                  <span :title="parseResponses(item).happened as string"
                     style="display: block; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                    {{ item.happened }}
+                    {{ parseResponses(item).happened }}
                   </span>
                 </template>
                 <template #item.actions="{ item }">
@@ -1248,30 +1242,13 @@ const deleteSchemaVersionConfirm = async (id: number) => {
       <VCardText class="pa-4">
         <div class="text-h6 mb-4">{{ historyViewItem.date }}</div>
         <VRow dense>
-          <VCol v-for="[label, val] in ([
-            ['Bathe', historyViewItem.bathe],
-            ['Wake', historyViewItem.wake],
-            ['Sleep', historyViewItem.sleep],
-            ['Nap', historyViewItem.nap],
-            ['Worked', historyViewItem.worked],
-            ['Stress', historyViewItem.stress],
-            ['Tired', historyViewItem.tired],
-            ['Game', historyViewItem.game],
-            ['Music', historyViewItem.music],
-            ['Grateful', historyViewItem.grateful],
-            ['Learn', historyViewItem.learn],
-            ['Exercise', historyViewItem.exercise],
-            ['Remember', historyViewItem.remember],
-            ['Day rating', historyViewItem.day_rating],
-            ['Feeling', historyViewItem.feeling],
-            ['Why', historyViewItem.why],
-            ['Phase', historyViewItem.phase],
-            ['Time', historyViewItem.time],
-            ['Happened', historyViewItem.happened],
-            ['Day name', historyViewItem.day_name],
-          ] as [string, string][])" :key="label" cols="12" sm="6">
-            <div class="text-caption text-disabled font-weight-medium">{{ label.toUpperCase() }}</div>
-            <div class="text-body-2 mb-2" style="white-space: pre-wrap; word-break: break-word;">{{ val || '—' }}</div>
+          <VCol
+            v-for="[key, val] in Object.entries(parseResponses(historyViewItem)).filter(([k]) => k !== 'date' && k !== 'time')"
+            :key="key" cols="12" sm="6">
+            <div class="text-caption text-disabled font-weight-medium">{{ formatFieldKey(key).toUpperCase() }}</div>
+            <div class="text-body-2 mb-2" style="white-space: pre-wrap; word-break: break-word;">
+              {{ Array.isArray(val) ? (val as string[]).join(', ') || '—' : val || '—' }}
+            </div>
           </VCol>
         </VRow>
       </VCardText>

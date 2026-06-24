@@ -106,6 +106,7 @@ const dbLoaded = ref(false)
 const halfLifeDays = ref(7)
 const maxSuggestions = ref(5)
 const dbTokenUsage = ref<TokenUsageRow[]>([])
+const activeSchemaVersionId = ref<number | null>(null)
 
 const getMappingsForGroup = (group: string) =>
   dbMappingsByGroup.value.get(group) ?? dbMappingsByGroup.value.get('main') ?? []
@@ -123,6 +124,7 @@ const loadDb = async () => {
   maxSuggestions.value = parseInt(settings.autocomplete_max_results ?? '5') || 5
 
   if (schemaVersion) {
+    activeSchemaVersionId.value = schemaVersion.id
     schemaFields.value = await getSchemaFields(schemaVersion.id)
 
     const groups = new Set<string>(['main'])
@@ -195,14 +197,19 @@ const loadFormData = () => {
     const saved = localStorage.getItem(STORAGE_KEY)
     if (saved) {
       const parsed = JSON.parse(saved)
-      // Backward compat: old string game/music/exercise → array
-      for (const key of ['game', 'music', 'exercise']) {
-        if (parsed[key] !== undefined && !Array.isArray(parsed[key])) {
-          parsed[key] = parsed[key] && parsed[key] !== 'N' ? [parsed[key]] : ['N']
-        }
-        if (Array.isArray(parsed[key]) && parsed[key].length === 0) parsed[key] = ['N']
-      }
       Object.assign(formData.value, parsed)
+      // Convert comma-separated strings → arrays for list/autocomplete_list fields.
+      // Happens when restoring from old form_history rows migrated via SQL.
+      for (const f of schemaFields.value) {
+        const v = formData.value[f.field_key]
+        if ((f.field_type === 'list' || f.field_type === 'autocomplete_list') && typeof v === 'string') {
+          formData.value[f.field_key] = v ? v.split(', ').filter(Boolean) : []
+        }
+        // Ensure defaultN fields never have an empty array
+        if (f.field_type === 'autocomplete_list' && f.config?.defaultN && Array.isArray(formData.value[f.field_key]) && (formData.value[f.field_key] as string[]).length === 0) {
+          formData.value[f.field_key] = ['N']
+        }
+      }
     }
   } catch (err) {
     console.error('Failed to load form data:', err)
@@ -362,31 +369,11 @@ const copyToClipboard = async () => {
         responses[f.field_key] = f.field_key === 'sleep' ? sleepTime : formData.value[f.field_key]
       }
       upsertFormHistory({
-        date:       formData.value.date as string,
-        bathe:      (formData.value.bathe as string) ?? '',
-        wake:       (formData.value.wake as string) ?? '',
-        sleep:      sleepTime ?? '',
-        nap:        String(formData.value.nap ?? ''),
-        worked:     String(formData.value.worked ?? ''),
-        stress:     String(formData.value.stress ?? ''),
-        tired:      String(formData.value.tired ?? ''),
-        game:       (formData.value.game as string[] | undefined)?.join(', ') || 'N',
-        music:      (formData.value.music as string[] | undefined)?.join(', ') || 'N',
-        grateful:   (formData.value.grateful as string[] | undefined)?.join(', ') ?? '',
-        learn:      (formData.value.learn as string[] | undefined)?.join(', ') ?? '',
-        exercise:   (formData.value.exercise as string[] | undefined)?.join(', ') || 'N',
-        remember:   String(formData.value.remember ?? ''),
-        day_rating: String(formData.value.dayRating ?? ''),
-        feeling:    String(formData.value.feeling ?? ''),
-        why:        (formData.value.why as string) ?? '',
-        phase:      (formData.value.phase as string[] | undefined)?.join(', ') ?? '',
-        time:       (formData.value.time as string) ?? '',
-        happened:   (formData.value.happened as string) ?? '',
-        day_name:   (formData.value.dayName as string) ?? '',
-        output:     text,
-        saved_at:   new Date().toISOString(),
-        responses:  JSON.stringify(responses),
-        schema_version_id: null,
+        date:              formData.value.date as string,
+        output:            text,
+        saved_at:          new Date().toISOString(),
+        responses:         JSON.stringify(responses),
+        schema_version_id: activeSchemaVersionId.value,
       }).catch(console.error)
     }
   } catch (err) {

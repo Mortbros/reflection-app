@@ -35,30 +35,10 @@ CREATE TABLE IF NOT EXISTS app_settings (
   value TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS form_history (
-  date      TEXT PRIMARY KEY,
-  bathe     TEXT,
-  wake      TEXT,
-  sleep     TEXT,
-  nap       TEXT,
-  worked    TEXT,
-  stress    TEXT,
-  tired     TEXT,
-  game      TEXT,
-  music     TEXT,
-  grateful  TEXT,
-  learn     TEXT,
-  exercise  TEXT,
-  remember  TEXT,
-  day_rating TEXT,
-  feeling   TEXT,
-  why       TEXT,
-  phase     TEXT,
-  time      TEXT,
-  happened  TEXT,
-  day_name  TEXT,
-  output    TEXT,
-  saved_at  TEXT,
-  responses TEXT,
+  date              TEXT PRIMARY KEY,
+  output            TEXT,
+  saved_at          TEXT,
+  responses         TEXT,
   schema_version_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS form_schema_version (
@@ -150,6 +130,8 @@ export function sqlitePlugin(dbPath: string): Plugin {
     try { db.run("ALTER TABLE mapping_instance ADD COLUMN grp TEXT NOT NULL DEFAULT 'main'") } catch {}
     try { db.run('ALTER TABLE form_history ADD COLUMN responses TEXT') } catch {}
     try { db.run('ALTER TABLE form_history ADD COLUMN schema_version_id INTEGER') } catch {}
+    try { db.run('ALTER TABLE form_history ADD COLUMN output TEXT') } catch {}
+    try { db.run('ALTER TABLE form_history ADD COLUMN saved_at TEXT') } catch {}
     // Seed 2025 schema if no schema versions exist
     const existing = db.exec('SELECT COUNT(*) as n FROM form_schema_version')
     if ((existing[0]?.values[0]?.[0] as number) === 0) {
@@ -185,6 +167,48 @@ export function sqlitePlugin(dbPath: string): Plugin {
         )
       }
     }
+    // Migrate form_history legacy fixed columns → responses JSON, then drop them
+    try {
+      db.exec('SELECT bathe FROM form_history LIMIT 0') // throws if already dropped
+      db.run(`
+        UPDATE form_history SET
+          responses = json_object(
+            'date',      date,
+            'bathe',     bathe,
+            'wake',      wake,
+            'sleep',     sleep,
+            'nap',       nap,
+            'worked',    worked,
+            'stress',    stress,
+            'tired',     tired,
+            'game',      game,
+            'music',     music,
+            'grateful',  grateful,
+            'learn',     learn,
+            'exercise',  exercise,
+            'remember',  remember,
+            'dayRating', day_rating,
+            'feeling',   feeling,
+            'why',       why,
+            'phase',     phase,
+            'happened',  happened,
+            'time',      time,
+            'dayName',   day_name
+          ),
+          schema_version_id = (SELECT id FROM form_schema_version WHERE effective_from = '2025-01-01')
+        WHERE responses IS NULL`)
+      for (const col of [
+        'bathe','wake','sleep','nap','worked','stress','tired',
+        'game','music','grateful','learn','exercise','remember',
+        'day_rating','feeling','why','phase','time','happened','day_name',
+      ]) {
+        db.run(`ALTER TABLE form_history DROP COLUMN ${col}`)
+      }
+      console.log('[sqlite] migrated form_history legacy columns to responses JSON')
+    } catch {
+      // columns already dropped — nothing to do
+    }
+
     writeDb()
     console.log(`[sqlite] using ${dbPath}`)
   }
