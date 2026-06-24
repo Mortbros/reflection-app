@@ -8,10 +8,9 @@ import TimeField from '@/components/fields/TimeField.vue';
 import FloatField from '@/components/fields/FloatField.vue';
 import IntField from '@/components/fields/IntField.vue';
 import StringField from '@/components/fields/StringField.vue';
-import ListField from '@/components/fields/ListField.vue';
+import CommaListField from '@/components/fields/CommaListField.vue';
 import PatternTextField from '@/components/fields/PatternTextField.vue';
 import TimeDisplay from '@/components/fields/TimeDisplay.vue';
-import AutocompleteListField from '@/components/fields/AutocompleteListField.vue';
 import { getTodayDate, getYesterdayDate } from '@/lib/fieldUtils';
 import {
   getMappingInstances, getListValues, getSuggestions, upsertFormHistory,
@@ -34,8 +33,8 @@ function getFieldComponent(type: string) {
     case 'float': return FloatField
     case 'int': return IntField
     case 'string': return StringField
-    case 'list': return ListField
-    case 'autocomplete_list': return AutocompleteListField
+    case 'list': return CommaListField
+    case 'autocomplete_list': return CommaListField
     default: return StringField
   }
 }
@@ -53,6 +52,8 @@ function getFieldProps(field: FormSchemaField): Record<string, unknown> {
       break
     case 'time':
       if (cfg.defaultToFuture) { base.defaultToFuture = true; base.futureMinutes = cfg.futureMinutes ?? 25 }
+      break
+    case 'list':
       break
     case 'autocomplete_list':
       base.suggestions = dbSuggestions.value.get(cfg.listTypeId as string) ?? []
@@ -182,12 +183,20 @@ function getDefaultValue(field: FormSchemaField): unknown {
   }
 }
 
-// When schema loads, initialize formData preserving any already-typed values
+// When schema loads, initialize formData preserving any already-typed values.
+// Also converts string→array for list fields from old migrated history rows.
 watch(schemaFields, (fields) => {
   const existing = formData.value
   const data: Record<string, unknown> = {}
   for (const f of fields) {
-    data[f.field_key] = f.field_key in existing ? existing[f.field_key] : getDefaultValue(f)
+    let val = f.field_key in existing ? existing[f.field_key] : getDefaultValue(f)
+    if ((f.field_type === 'list' || f.field_type === 'autocomplete_list') && typeof val === 'string') {
+      val = (val as string) ? (val as string).split(', ').filter(Boolean) : []
+    }
+    if (f.field_type === 'autocomplete_list' && f.config?.defaultN && Array.isArray(val) && (val as string[]).length === 0) {
+      val = ['N']
+    }
+    data[f.field_key] = val
   }
   formData.value = data
 }, { immediate: false })
@@ -197,19 +206,8 @@ const loadFormData = () => {
     const saved = localStorage.getItem(STORAGE_KEY)
     if (saved) {
       const parsed = JSON.parse(saved)
+      // Merge into formData — the schemaFields watcher handles type coercion
       Object.assign(formData.value, parsed)
-      // Convert comma-separated strings → arrays for list/autocomplete_list fields.
-      // Happens when restoring from old form_history rows migrated via SQL.
-      for (const f of schemaFields.value) {
-        const v = formData.value[f.field_key]
-        if ((f.field_type === 'list' || f.field_type === 'autocomplete_list') && typeof v === 'string') {
-          formData.value[f.field_key] = v ? v.split(', ').filter(Boolean) : []
-        }
-        // Ensure defaultN fields never have an empty array
-        if (f.field_type === 'autocomplete_list' && f.config?.defaultN && Array.isArray(formData.value[f.field_key]) && (formData.value[f.field_key] as string[]).length === 0) {
-          formData.value[f.field_key] = ['N']
-        }
-      }
     }
   } catch (err) {
     console.error('Failed to load form data:', err)
@@ -342,7 +340,7 @@ const copyToClipboard = async () => {
     }
   }
 
-  const outputFields = schemaFields.value.filter(f => f.field_type !== 'time_display')
+  const outputFields = schemaFields.value
   const text = outputFields.map(f => serializeField(f, f.field_key === 'sleep' ? sleepTime : undefined)).join('\t')
 
   try {
@@ -399,8 +397,8 @@ onUnmounted(() => document.removeEventListener('app:copy', onAppCopy))
 // ── Mount ─────────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
-  await loadDb()
-  loadFormData()
+  loadFormData()      // load saved values FIRST so schemaFields watcher sees them
+  await loadDb()      // sets schemaFields; watcher preserves the loaded values
   await nextTick()
   fieldRefs.value[navigableKeys.value[0] ?? '']?.focus()
 })
@@ -414,7 +412,8 @@ onMounted(async () => {
           <VProgressLinear v-if="!dbLoaded" indeterminate color="primary" height="2" />
           <VCardText>
             <div class="d-flex flex-column ga-6">
-              <div class="d-flex align-center ga-4 mb-4">
+              <div class="d-flex align-center ga-2 mb-4">
+                <VBtn icon="mdi-help-circle-outline" variant="text" size="small" @click="router.push('/help')" />
                 <div class="d-flex justify-center flex-wrap ga-4 flex-grow-1">
                   <VBtn :color="copySuccess ? 'success' : 'primary'" size="large" class="text-h6"
                     @click="copyToClipboard" :prepend-icon="copySuccess ? 'mdi-check' : 'mdi-content-copy'">
@@ -426,7 +425,6 @@ onMounted(async () => {
                   </VBtn>
                 </div>
                 <VBtn icon="mdi-cog" variant="text" size="small" @click="router.push('/settings')" />
-                <VBtn icon="mdi-help-circle-outline" variant="text" size="small" @click="router.push('/help')" />
               </div>
 
               <!-- Date row (special: inline Today button) -->

@@ -12,7 +12,7 @@ import {
   getListValues, insertListValue, updateListValue, deleteListValue, setListValueEnabled,
   getMappingTypes, insertMappingType, updateMappingType, deleteMappingType,
   countMappingsUsingType, renameMappingTypeId,
-  getFormHistory, deleteFormHistoryRow,
+  getFormHistory, deleteFormHistoryRow, upsertFormHistory,
   getFormHistoryHappenedTexts, getAllAppSettings, setAppSetting,
   getFormSchemaVersions, getSchemaFields, upsertSchemaVersion, deleteSchemaVersion, replaceSchemaFields,
 } from '@/lib/db';
@@ -146,8 +146,9 @@ const toggleMapping = async (id: number, enabled: boolean) => {
 
 const mappingHeaders: TableHeader[] = [
   { title: '', key: 'enabled', width: '44px', sortable: false },
-  { title: 'Name', key: 'name', width: '38%' },
+  { title: 'Name', key: 'name', width: '35%' },
   { title: 'Expansion', key: 'expansion' },
+  { title: 'Group', key: 'grp', width: '80px', sortable: false },
   { title: '', key: 'actions', sortable: false, align: 'end', width: '48px' },
 ];
 
@@ -362,6 +363,87 @@ const typeHeaders: TableHeader[] = [
 // ── CSV import ────────────────────────────────────────────────────────────────
 
 type ImportTarget = 'mappings' | 'listValues' | 'types'
+
+// ── History import ────────────────────────────────────────────────────────────
+
+const historyImportDialog = ref(false);
+const historyImportLoading = ref(false);
+const historyImportFile = ref<File | File[] | null>(null);
+const historyImportPreview = ref<{ date: string; rows: number } | null>(null);
+const historyImportError = ref('');
+
+function parseTsvLine(line: string): string[] {
+  return line.split('\t')
+}
+
+function parseDelimitedFile(text: string): Record<string, string>[] {
+  const lines = text.trim().split(/\r?\n/).filter(l => l.trim())
+  if (lines.length < 2) return []
+  // Detect delimiter: tab = TSV (from Excel), else CSV
+  const isTab = lines[0].includes('\t')
+  const headers = isTab
+    ? parseTsvLine(lines[0]).map(h => h.trim())
+    : parseCsvLine(lines[0]).map(h => h.trim())
+  return lines.slice(1).map(line => {
+    const vals = isTab ? parseTsvLine(line) : parseCsvLine(line)
+    return Object.fromEntries(headers.map((h, i) => [h, (vals[i] ?? '').trim()]))
+  })
+}
+
+const onHistoryImportFileChange = (file: File | File[] | null) => {
+  const f = Array.isArray(file) ? file[0] : file
+  historyImportPreview.value = null
+  historyImportError.value = ''
+  if (!f) return
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    const rows = parseDelimitedFile(e.target?.result as string)
+    const dateRows = rows.filter(r => r.date)
+    historyImportPreview.value = dateRows.length ? { date: dateRows[0].date, rows: dateRows.length } : null
+    if (!dateRows.length) historyImportError.value = 'No rows with a "date" column found.'
+  }
+  reader.readAsText(f)
+}
+
+const runHistoryImport = async () => {
+  const f = Array.isArray(historyImportFile.value) ? historyImportFile.value[0] : historyImportFile.value
+  if (!f) return
+  historyImportLoading.value = true
+  const text = await f.text()
+  const rows = parseDelimitedFile(text).filter(r => r.date)
+  let imported = 0
+  for (const row of rows) {
+    const output = Object.values(row).join('\t')
+    await upsertFormHistory({
+      date: row.date,
+      output,
+      saved_at: new Date().toISOString(),
+      responses: JSON.stringify(row),
+      schema_version_id: null,
+    })
+    imported++
+  }
+  historyImportLoading.value = false
+  historyImportDialog.value = false
+  historyImportFile.value = null
+  historyImportPreview.value = null
+  await loadHistory()
+  notify(`Imported ${imported} entr${imported !== 1 ? 'ies' : 'y'}`)
+}
+
+const downloadHistoryExampleCsv = () => {
+  // Build example from current schema if loaded, otherwise use generic column names
+  const fields = schemaFields.value.length
+    ? schemaFields.value.map(f => f.field_key)
+    : ['date', 'bathe', 'wake', 'sleep', 'stress', 'tired', 'dayRating', 'feeling', 'why', 'happened']
+  const header = fields.join(',')
+  const example = [header, fields.map((f, i) => i === 0 ? '2025-06-01' : '').join(',')].join('\n')
+  const blob = new Blob([example], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = 'example_history.csv'; a.click()
+  URL.revokeObjectURL(url)
+}
 
 const importDialog = ref(false);
 const importTarget = ref<ImportTarget>('mappings');
@@ -601,17 +683,14 @@ const saveSetting = async (key: string, value: string) => {
 };
 
 watch(tab, async (t) => {
-  if (t === 'suggestions') {
-    if (!Object.keys(appSettings.value).length) await loadAppSettings();
-    await loadSuggestions();
-  }
+  if (t === 'scan' && !Object.keys(appSettings.value).length) await loadAppSettings();
   if (t === 'appSettings' && !Object.keys(appSettings.value).length) await loadAppSettings();
 });
 
 // Pre-fill mapping dialog from a suggestion
 const openAddMappingFromSuggestion = (sentence: string) => {
   // Sentence is the expansion text — leave the mapping name for the user to fill in
-  mappingForm.value = { id: null, name: '', expansion: sentence, addBase: false };
+  mappingForm.value = { id: null, name: '', expansion: sentence, grp: 'main', addBase: false };
   mappingDialog.value = true;
   tab.value = 'mappings';
 };
@@ -711,10 +790,7 @@ const testNameMatches = computed(() => {
 });
 
 watch(tab, async (t) => {
-  if (t === 'test') {
-    await nextTick();
-    testInputRef.value?.focus();
-  }
+  if (t === 'test') { await nextTick(); testInputRef.value?.focus(); }
   if (t === 'schema') loadSchemaVersions();
 });
 
@@ -789,21 +865,19 @@ const deleteSchemaVersionConfirm = async (id: number) => {
 
       <VCard variant="outlined">
         <VProgressLinear v-if="loading" indeterminate color="primary" height="2" />
-        <VTabs v-model="tab">
+        <VTabs v-model="tab" density="compact">
           <VTab value="mappings">Mappings</VTab>
-          <VTab value="listValues">List Values</VTab>
+          <VTab value="listValues">Lists</VTab>
           <VTab value="types">Types</VTab>
           <VTab value="history" @click="loadHistory">History</VTab>
-          <div class="align-self-center mx-1" style="width:1px; height:20px; background: rgba(var(--v-border-color), var(--v-border-opacity))" />
-          <VTab value="conflicts">Conflicts</VTab>
+          <VTab value="scan">Scan</VTab>
           <VTab value="test">Test</VTab>
-          <VTab value="suggestions">Suggestions</VTab>
           <VTab value="appSettings">Frecency</VTab>
           <VTab value="schema">Schema</VTab>
         </VTabs>
 
         <VCardText class="pa-2 pa-sm-3">
-          <VTabsWindow v-model="tab">
+          <VTabsWindow v-model="tab" :transition="false" :reverse-transition="false">
 
             <!-- ── Mappings ───────────────────────────────────────────────── -->
             <VTabsWindowItem value="mappings">
@@ -821,6 +895,9 @@ const deleteSchemaVersionConfirm = async (id: number) => {
                 <template #item.enabled="{ item }">
                   <VCheckbox :model-value="item.enabled" density="compact" hide-details @click.stop
                     @update:model-value="(v: boolean) => toggleMapping(item.id, v)" />
+                </template>
+                <template #item.grp="{ item }">
+                  <span class="text-caption text-medium-emphasis">{{ item.grp }}</span>
                 </template>
                 <template #item.actions="{ item }">
                   <VBtn icon="mdi-delete" size="x-small" variant="text" color="error"
@@ -895,6 +972,7 @@ const deleteSchemaVersionConfirm = async (id: number) => {
             <!-- ── History ────────────────────────────────────────────────── -->
             <VTabsWindowItem value="history">
               <div class="d-flex align-center ga-2 mb-2">
+                <VBtn size="small" prepend-icon="mdi-upload" variant="tonal" @click="historyImportDialog = true">Import</VBtn>
                 <VTextField v-model="historySearch" density="compact" placeholder="Search…"
                   prepend-inner-icon="mdi-magnify" clearable hide-details class="flex-grow-1"
                   style="max-width: 320px" />
@@ -920,21 +998,23 @@ const deleteSchemaVersionConfirm = async (id: number) => {
               </VDataTable>
             </VTabsWindowItem>
 
-            <!-- ── Conflicts ─────────────────────────────────────────────── -->
-            <VTabsWindowItem value="conflicts">
+            <!-- ── Scan (conflicts + suggestions) ──────────────────────── -->
+            <VTabsWindowItem value="scan">
+
+              <!-- Conflicts section -->
+              <div class="text-caption text-medium-emphasis font-weight-medium mb-2 mt-1">CONFLICTS</div>
               <div class="d-flex align-center ga-2 mb-3">
-                <VBtn size="small" prepend-icon="mdi-refresh" @click="computeConflicts">Scan</VBtn>
+                <VBtn size="small" prepend-icon="mdi-refresh" @click="computeConflicts">Run</VBtn>
                 <span v-if="conflictsLoaded" class="text-body-2 text-medium-emphasis">
                   {{ conflicts.length === 0 ? 'No conflicts found' : `${conflicts.length} conflict${conflicts.length !== 1 ? 's' : ''} found` }}
                 </span>
               </div>
 
-              <div v-if="conflicts.length === 0 && conflictsLoaded" class="text-body-2 text-medium-emphasis pa-2">
+              <div v-if="conflicts.length === 0 && conflictsLoaded" class="text-body-2 text-medium-emphasis pa-2 mb-3">
                 No conflicts found — no two mappings match the same input.
               </div>
 
               <div v-for="conflict in conflicts" :key="conflict.input" class="mb-2">
-                <!-- Collapsed (ignored) row -->
                 <div v-if="ignoredConflicts.has(conflict.input)"
                   class="d-flex align-center ga-2 pa-2 rounded text-disabled"
                   style="background: rgba(128,128,128,0.06); cursor: pointer"
@@ -943,21 +1023,16 @@ const deleteSchemaVersionConfirm = async (id: number) => {
                   <code class="text-caption">{{ conflict.input }}</code>
                   <span class="text-caption">{{ conflict.matches.length }} matches — click to expand</span>
                 </div>
-
-                <!-- Expanded conflict card -->
                 <VCard v-else variant="outlined" class="pa-3">
                   <div class="d-flex align-center justify-space-between mb-2">
                     <div class="d-flex align-center ga-2">
                       <span class="text-caption text-medium-emphasis">Input</span>
                       <code class="text-body-2 font-weight-bold">{{ conflict.input }}</code>
                     </div>
-                    <VBtn size="x-small" variant="text" @click="ignoreConflict(conflict.input)">
-                      Ignore
-                    </VBtn>
+                    <VBtn size="x-small" variant="text" @click="ignoreConflict(conflict.input)">Ignore</VBtn>
                   </div>
                   <div v-for="(match, i) in conflict.matches" :key="match.mapping.id"
-                    class="d-flex align-center ga-2 py-1"
-                    :class="i > 0 ? 'text-disabled' : ''">
+                    class="d-flex align-center ga-2 py-1" :class="i > 0 ? 'text-disabled' : ''">
                     <VChip :color="i === 0 ? 'success' : undefined" size="x-small" :variant="i === 0 ? 'tonal' : 'outlined'">
                       {{ i === 0 ? 'wins' : 'shadowed' }}
                     </VChip>
@@ -967,6 +1042,31 @@ const deleteSchemaVersionConfirm = async (id: number) => {
                   </div>
                 </VCard>
               </div>
+
+              <VDivider class="my-4" />
+
+              <!-- Suggestions section -->
+              <div class="text-caption text-medium-emphasis font-weight-medium mb-2">MAPPING SUGGESTIONS</div>
+              <div class="d-flex align-center ga-2 mb-3">
+                <VBtn size="small" prepend-icon="mdi-refresh" @click="loadSuggestions">Run</VBtn>
+                <span class="text-body-2 text-medium-emphasis">
+                  Unmapped tokens typed ≥ {{ appSettings.suggestion_threshold ?? 3 }} times
+                </span>
+              </div>
+              <div v-if="suggestionsLoaded && suggestions.length === 0" class="text-body-2 text-disabled pa-2">
+                No candidates yet — keep using the app and check back later.
+              </div>
+              <div v-for="s in suggestions" :key="s.raw_input"
+                class="d-flex align-center ga-3 py-2 px-2 rounded mb-1"
+                style="background: rgba(128,128,128,0.06)">
+                <code class="text-body-2 font-weight-medium flex-grow-1">{{ s.raw_input }}</code>
+                <VChip size="small" variant="tonal">{{ s.count }}×</VChip>
+                <VBtn size="small" variant="tonal" prepend-icon="mdi-plus"
+                  @click="openAddMappingFromSuggestion(s.raw_input)">
+                  Create mapping
+                </VBtn>
+              </div>
+
             </VTabsWindowItem>
 
             <!-- ── Test ───────────────────────────────────────────────────── -->
@@ -1014,30 +1114,7 @@ const deleteSchemaVersionConfirm = async (id: number) => {
               </template>
             </VTabsWindowItem>
 
-            <!-- ── Suggestions ─────────────────────────────────────────── -->
-            <VTabsWindowItem value="suggestions">
-              <div class="d-flex align-center ga-2 mb-3">
-                <VBtn size="small" prepend-icon="mdi-refresh" @click="loadSuggestions">Refresh</VBtn>
-                <span class="text-body-2 text-medium-emphasis">
-                  Unmapped tokens typed ≥ {{ appSettings.suggestion_threshold ?? 3 }} times
-                </span>
-              </div>
 
-              <div v-if="suggestionsLoaded && suggestions.length === 0" class="text-body-2 text-disabled pa-2">
-                No candidates yet — keep using the app and check back later.
-              </div>
-
-              <div v-for="s in suggestions" :key="s.raw_input"
-                class="d-flex align-center ga-3 py-2 px-2 rounded mb-1"
-                style="background: rgba(128,128,128,0.06)">
-                <code class="text-body-2 font-weight-medium flex-grow-1">{{ s.raw_input }}</code>
-                <VChip size="small" variant="tonal">{{ s.count }}×</VChip>
-                <VBtn size="small" variant="tonal" prepend-icon="mdi-plus"
-                  @click="openAddMappingFromSuggestion(s.raw_input)">
-                  Create mapping
-                </VBtn>
-              </div>
-            </VTabsWindowItem>
 
             <!-- ── Frecency settings ───────────────────────────────────── -->
             <VTabsWindowItem value="appSettings">
@@ -1258,6 +1335,42 @@ const deleteSchemaVersionConfirm = async (id: number) => {
           Restore to form
         </VBtn>
         <VBtn size="small" variant="text" @click="historyViewDialog = false">Close</VBtn>
+      </div>
+    </VCard>
+  </VDialog>
+
+  <!-- History import dialog -->
+  <VDialog v-model="historyImportDialog" max-width="520">
+    <VCard>
+      <VCardText class="pa-4 d-flex flex-column ga-3">
+        <div class="text-h6">Import History</div>
+        <div class="text-body-2 text-medium-emphasis">
+          Upload a TSV (paste from Excel) or CSV file. First row must be headers matching field keys
+          (e.g. <code>date</code>, <code>happened</code>, …). A <code>date</code> column is required.
+        </div>
+        <VFileInput
+          v-model="historyImportFile"
+          label="Choose file (.tsv, .csv, .txt)"
+          accept=".tsv,.csv,.txt"
+          density="compact"
+          hide-details="auto"
+          @update:model-value="onHistoryImportFileChange"
+        />
+        <div v-if="historyImportError" class="text-error text-caption">{{ historyImportError }}</div>
+        <div v-if="historyImportPreview" class="text-body-2">
+          Ready to import <strong>{{ historyImportPreview.rows }}</strong> row{{ historyImportPreview.rows !== 1 ? 's' : '' }}
+          (first date: {{ historyImportPreview.date }})
+        </div>
+      </VCardText>
+      <div class="d-flex justify-space-between align-center ga-2 pa-4 pt-0">
+        <VBtn size="small" variant="text" prepend-icon="mdi-download" @click="downloadHistoryExampleCsv">
+          Example CSV
+        </VBtn>
+        <div class="d-flex ga-2">
+          <VBtn variant="text" @click="historyImportDialog = false; historyImportFile = null; historyImportPreview = null">Cancel</VBtn>
+          <VBtn color="primary" :disabled="!historyImportPreview || !!historyImportError" :loading="historyImportLoading"
+            @click="runHistoryImport">Import</VBtn>
+        </div>
       </div>
     </VCard>
   </VDialog>
