@@ -1377,3 +1377,12 @@ const deleteSchemaVersionConfirm = async (id: number) => {
 
   <VSnackbar v-model="snackbar" :timeout="1500">{{ snackbarText }}</VSnackbar>
 </template>
+
+<style>
+/* Kill tab-switch slide animation */
+.v-window__container,
+.v-window-item {
+  transition: none !important;
+  animation: none !important;
+}
+</style>

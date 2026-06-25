@@ -405,10 +405,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <VContainer fluid class="fill-height">
+  <VContainer fluid>
     <VRow justify="center">
       <VCol cols="12" md="10" lg="8" xl="6">
-        <VCard variant="outlined" class="pa-6">
+        <VCard variant="outlined" class="pa-6" style="min-height: 100vh;">
           <VProgressLinear v-if="!dbLoaded" indeterminate color="primary" height="2" />
           <VCardText>
             <div class="d-flex flex-column ga-6">
