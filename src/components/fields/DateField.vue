@@ -42,6 +42,6 @@ onMounted(() => {
 </script>
 
 <template>
-  <VTextField ref="inputRef" v-model="value" :label="label" type="date" variant="outlined" density="comfortable"
-    class="text-h6" :rules="required ? [(v: string) => !!v || 'Required'] : []" hide-details @keydown="handleKeydown" />
+  <VTextField ref="inputRef" v-model="value" :label="label" type="date" variant="outlined"
+    :rules="required ? [(v: string) => !!v || 'Required'] : []" hide-details @keydown="handleKeydown" />
 </template>

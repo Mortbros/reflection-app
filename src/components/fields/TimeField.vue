@@ -81,7 +81,7 @@ onMounted(() => {
 
 <template>
   <VTextField ref="inputRef" v-model="value" :label="label" type="text" pattern="([01]?[0-9]|2[0-3]):[0-5][0-9]"
-    placeholder="HH:mm (24-hour)" variant="outlined" density="comfortable" class="text-h6"
+    placeholder="HH:mm (24-hour)" variant="outlined"
     :rules="required ? [(v: string) => !!v || 'Required'] : []" tabindex="-1" hide-details @keydown="handleKeydown"
     @blur="formatTime" />
 </template>

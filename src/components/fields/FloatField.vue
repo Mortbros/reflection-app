@@ -67,7 +67,7 @@ defineExpose({ focus });
 
 <template>
   <VTextField ref="inputRef" v-model="stringValue" :label="label" type="number" :step="0.1" :min="1" :max="max"
-    variant="outlined" density="comfortable" class="text-h6"
+    variant="outlined"
     :rules="required ? [(v: string) => (v !== '' && parseFloat(v) >= 1) || 'Must be at least 1'] : []" hide-details
     @keydown="handleKeydown" @blur="handleBlur" />
 </template>

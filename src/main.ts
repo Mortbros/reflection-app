@@ -25,6 +25,11 @@ const getDefaultTheme = () => {
 app.use(createVuetify({
   components,
   directives,
+  defaults: {
+    VTextField: { density: 'compact' },
+    VCombobox:  { density: 'compact' },
+    VSelect:    { density: 'compact' },
+  },
   theme: {
     defaultTheme: getDefaultTheme(),
     themes: {

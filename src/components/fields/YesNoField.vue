@@ -54,6 +54,6 @@ watch(() => props.modelValue, (newVal) => {
 </script>
 
 <template>
-  <VTextField ref="inputRef" v-model="value" :label="label" variant="outlined" density="comfortable" class="text-h6"
+  <VTextField ref="inputRef" v-model="value" :label="label" variant="outlined"
     :rules="required ? [(v: string) => !!v || 'Required'] : []" hide-details @keydown="handleKeydown" />
 </template>

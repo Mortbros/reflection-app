@@ -508,8 +508,8 @@ defineExpose({ focus, capitalize });
       v-model="value"
       :label="label"
       variant="outlined"
-      density="comfortable"
-      class="text-h6"
+     
+     
       :class="{ 'manual-mode': !shortcutMode }"
       :rules="required ? [(v: string) => !!v || 'Required'] : []"
       hide-details

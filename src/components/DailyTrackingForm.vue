@@ -9,6 +9,7 @@ import FloatField from '@/components/fields/FloatField.vue';
 import IntField from '@/components/fields/IntField.vue';
 import StringField from '@/components/fields/StringField.vue';
 import CommaListField from '@/components/fields/CommaListField.vue';
+import PlainListField from '@/components/fields/PlainListField.vue';
 import PatternTextField from '@/components/fields/PatternTextField.vue';
 import TimeDisplay from '@/components/fields/TimeDisplay.vue';
 import { getTodayDate, getYesterdayDate } from '@/lib/fieldUtils';
@@ -33,7 +34,7 @@ function getFieldComponent(type: string) {
     case 'float': return FloatField
     case 'int': return IntField
     case 'string': return StringField
-    case 'list': return CommaListField
+    case 'list': return PlainListField
     case 'autocomplete_list': return CommaListField
     default: return StringField
   }
@@ -340,7 +341,12 @@ const copyToClipboard = async () => {
     }
   }
 
-  const outputFields = schemaFields.value
+  const outputFields = [...schemaFields.value]
+  const timeIdx = outputFields.findIndex(f => f.field_key === 'time')
+  const happenedIdx = outputFields.findIndex(f => f.field_key === 'happened')
+  if (timeIdx !== -1 && happenedIdx !== -1) {
+    ;[outputFields[timeIdx], outputFields[happenedIdx]] = [outputFields[happenedIdx], outputFields[timeIdx]]
+  }
   const text = outputFields.map(f => serializeField(f, f.field_key === 'sleep' ? sleepTime : undefined)).join('\t')
 
   try {

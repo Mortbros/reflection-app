@@ -40,6 +40,6 @@ const focus = () => {
 </script>
 
 <template>
-  <VTextField ref="inputRef" :model-value="modelValue" label="Time" variant="outlined" density="comfortable"
-    class="text-h6" hide-details readonly disabled tabindex="-1" />
+  <VTextField ref="inputRef" :model-value="modelValue" label="Time" variant="outlined"
+    hide-details readonly disabled tabindex="-1" />
 </template>
