@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { VCombobox } from 'vuetify/components'
 
 const props = defineProps<{
@@ -42,16 +42,17 @@ function save(val: string[]) {
   emit('update:modelValue', val.filter(Boolean))
 }
 
+// Only handles syncing when VCombobox itself adds items (e.g. clicking a suggestion)
 function handleUpdate(val: unknown) {
   if (!Array.isArray(val)) return
   localValue.value = (val as string[]).filter(Boolean)
   save(localValue.value)
 }
 
-// Filtered suggestions for current search (for Enter→top-pick logic)
 const filteredSuggestions = computed(() => {
-  if (!props.suggestions?.length || !searchText.value) return props.suggestions ?? []
+  if (!props.suggestions?.length) return []
   const q = searchText.value.toLowerCase()
+  if (!q) return props.suggestions
   return props.suggestions.filter(s => s.toLowerCase().startsWith(q))
 })
 
@@ -67,17 +68,40 @@ function clearInput() {
 }
 
 function addChip(value: string) {
-  if (!value || localValue.value.includes(value)) return
-  const newVal = [...localValue.value, value]
+  const trimmed = value.trim()
+  if (!trimmed || localValue.value.includes(trimmed)) {
+    clearInput()
+    return
+  }
+  const newVal = [...localValue.value, trimmed]
   localValue.value = newVal
   save(newVal)
   clearInput()
   nextTick(() => getNativeInput()?.focus())
 }
 
-function handleKeydown(e: KeyboardEvent) {
-  // Comma+Space: commit current typed text as chip (allows free text)
+// Capture-phase listener on the native <input> — runs BEFORE VCombobox's handlers.
+// This prevents VCombobox from adding typed text as a chip when Enter is pressed;
+// we control all chip addition manually.
+function nativeKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter') {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!searchText.value) {
+      props.onNext?.()
+      return
+    }
+    // Always pick the top filtered suggestion; never add free text via Enter
+    if (filteredSuggestions.value.length > 0) {
+      addChip(filteredSuggestions.value[0])
+    }
+    // No match → do nothing (user must use ', ' to add free text)
+    return
+  }
+
+  // Comma+Space: commit typed text as a free-text chip
   if (e.key === ' ' && searchText.value.endsWith(',')) {
+    e.stopPropagation()
     e.preventDefault()
     const val = searchText.value.slice(0, -1).trim()
     if (val) addChip(val)
@@ -85,25 +109,9 @@ function handleKeydown(e: KeyboardEvent) {
     return
   }
 
-  // Enter: select top filtered suggestion; if empty → advance field
-  if (e.key === 'Enter') {
-    if (!searchText.value) {
-      e.preventDefault()
-      props.onNext?.()
-      return
-    }
-    if (filteredSuggestions.value.length > 0) {
-      e.preventDefault()
-      addChip(filteredSuggestions.value[0])
-      return
-    }
-    // No suggestions match and not empty → do nothing (comma+space to add free text)
-    e.preventDefault()
-    return
-  }
-
-  // Backspace on empty search: remove last chip immediately (single press)
+  // Single backspace removes last chip when the text input is empty
   if (e.key === 'Backspace' && !searchText.value) {
+    e.stopPropagation()
     e.preventDefault()
     if (localValue.value.length > 0) {
       const newVal = localValue.value.slice(0, -1)
@@ -113,19 +121,30 @@ function handleKeydown(e: KeyboardEvent) {
     return
   }
 
-  // Tab: commit partial text if any, then advance
+  // Tab: commit current text (pick top suggestion), then advance
   if (e.key === 'Tab') {
+    e.stopPropagation()
     e.preventDefault()
     const val = searchText.value.trim().replace(/,$/, '')
-    if (val && filteredSuggestions.value.length > 0) {
-      addChip(filteredSuggestions.value[0])
-    } else if (val) {
-      addChip(val)
+    if (val) {
+      if (filteredSuggestions.value.length > 0) addChip(filteredSuggestions.value[0])
+      else addChip(val)
     }
     if (e.shiftKey) props.onPrevious?.()
     else props.onNext?.()
+    return
   }
+  // All other keys (ArrowDown, ArrowUp, Escape, etc.) propagate to VCombobox normally
 }
+
+onMounted(async () => {
+  await nextTick()
+  getNativeInput()?.addEventListener('keydown', nativeKeydown, { capture: true })
+})
+
+onUnmounted(() => {
+  getNativeInput()?.removeEventListener('keydown', nativeKeydown, { capture: true })
+})
 </script>
 
 <template>
@@ -143,18 +162,26 @@ function handleKeydown(e: KeyboardEvent) {
     autocomplete="off"
     class="comma-list-field"
     @update:model-value="handleUpdate"
-    @keydown="handleKeydown"
   />
 </template>
 
 <style scoped>
-/* Make chips roughly match body text size and sit flush with a compact field */
+/* Reduce internal top/bottom padding so the chip combobox matches other compact fields */
+.comma-list-field :deep(.v-field__input) {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  padding-left: 16px;
+  min-height: unset;
+  gap: 4px;
+}
+
+/* Chips: same visual weight as normal body text */
 .comma-list-field :deep(.v-chip) {
-  font-size: 0.9rem;
-  height: 26px;
+  font-size: 1rem;
+  height: 28px;
   padding: 0 10px;
 }
 .comma-list-field :deep(.v-chip .v-chip__close) {
-  font-size: 16px;
+  font-size: 18px;
 }
 </style>

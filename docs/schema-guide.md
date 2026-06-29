@@ -166,7 +166,7 @@ A single-line text field.
 
 ### `list`
 
-A multi-value text field. Values can be added by pressing Enter/Tab on the last input, or by typing `, ` (comma-space) which splits the current input. Designed for freeform lists like "Grateful" or "Learn".
+A plain text field for freeform comma-separated values (e.g. Grateful, Learn). Type values separated by `, ` (comma-space) — they are stored and output as an array. No autocomplete dropdown.
 
 ```yaml
 - key: grateful
@@ -179,12 +179,20 @@ A multi-value text field. Values can be added by pressing Enter/Tab on the last 
 
 ### `autocomplete_list`
 
-A multi-value field with autocomplete suggestions drawn from a `list_values` type. Past-submitted values are automatically saved back to the list.
+A chip-based multi-value field with autocomplete suggestions drawn from a `list_values` type. Past-submitted values are automatically saved back to the list.
+
+**Interaction:**
+- Type to filter suggestions; **Enter** always picks the top matching suggestion.
+- **`, ` (comma-space)** adds the literally-typed text as a chip (the only way to add free text not in the suggestion list).
+- **Backspace** on an empty input removes the last chip.
+- Tab/Enter on an empty field advances to the next field.
+
+**Empty-value behaviour:** if `emptyValue` is set, the field is displayed empty (no chip shown). When the form is copied to clipboard, an empty field outputs `emptyValue` instead of a blank. This replaces the older `defaultN: true` flag (which is still accepted for backward compatibility).
 
 | Config key | Type | Description |
 |---|---|---|
 | `listTypeId` | string | The `id` of the mapping_type to pull suggestions from (e.g. `"game"`, `"music"`). |
-| `defaultN` | boolean | If true, the initial value is `['N']` and the clipboard output falls back to `N` for empty arrays. |
+| `emptyValue` | string | Value written to clipboard output when the field has no selection (e.g. `"N"`). Field stays blank in the UI. |
 | `autoSelect` | boolean | If false, the field does not auto-select its contents on focus. Default true. |
 
 ```yaml
@@ -193,7 +201,7 @@ A multi-value field with autocomplete suggestions drawn from a `list_values` typ
   type: autocomplete_list
   config:
     listTypeId: game
-    defaultN: true
+    emptyValue: "N"
 
 - key: phase
   label: Phase
@@ -278,7 +286,7 @@ Row group numbers only need to be consistent within a schema — they don't have
 
 ## Clipboard output
 
-The form copies a tab-separated line to the clipboard. Fields appear in the order they are listed in the schema. `time_display` fields are excluded from the output. Multi-value fields (`list`, `autocomplete_list`) are joined with `, `. If `defaultN` is set, an empty array outputs `N`.
+The form copies a tab-separated line to the clipboard. Fields appear in the order they are listed in the schema, except that `happened` and `time_display` are swapped in output order (happened outputs before time regardless of schema order). `time_display` is included in the output. Multi-value fields (`list`, `autocomplete_list`) are joined with `, `. If `emptyValue` is set on an `autocomplete_list` field, an empty selection outputs that value instead of blank.
 
 ---
 

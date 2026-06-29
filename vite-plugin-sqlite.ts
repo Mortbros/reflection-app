@@ -132,6 +132,24 @@ export function sqlitePlugin(dbPath: string): Plugin {
     try { db.run('ALTER TABLE form_history ADD COLUMN schema_version_id INTEGER') } catch {}
     try { db.run('ALTER TABLE form_history ADD COLUMN output TEXT') } catch {}
     try { db.run('ALTER TABLE form_history ADD COLUMN saved_at TEXT') } catch {}
+    // Migrate defaultN:true → emptyValue:"N" in form_schema_field config
+    try {
+      const rows = db.exec("SELECT id, config FROM form_schema_field WHERE config LIKE '%defaultN%'")
+      if (rows[0]) {
+        for (const [id, cfg] of rows[0].values as [number, string][]) {
+          const parsed = JSON.parse(cfg)
+          if (parsed.defaultN) {
+            delete parsed.defaultN
+            parsed.emptyValue = 'N'
+            db.run('UPDATE form_schema_field SET config = ? WHERE id = ?', [JSON.stringify(parsed), id])
+          }
+        }
+      }
+    } catch {}
+    // Migrate: ensure bathe/wake/sleep are all in row_group 1
+    try {
+      db.run(`UPDATE form_schema_field SET row_group = 1 WHERE field_key IN ('bathe','wake','sleep') AND row_group IS NULL`)
+    } catch {}
     // Seed 2025 schema if no schema versions exist
     const existing = db.exec('SELECT COUNT(*) as n FROM form_schema_version')
     if ((existing[0]?.values[0]?.[0] as number) === 0) {
@@ -146,11 +164,11 @@ export function sqlitePlugin(dbPath: string): Plugin {
         ['worked',    'Worked',         'float',            '{"max":24}',                                  2,    60],
         ['stress',    'Stress',         'float',            '{"max":10,"required":true}',                  3,    70],
         ['tired',     'Tired',          'float',            '{"max":10,"required":true}',                  3,    80],
-        ['game',      'Game',           'autocomplete_list','{"listTypeId":"game","defaultN":true}',       null, 90],
-        ['music',     'Music',          'autocomplete_list','{"listTypeId":"music","defaultN":true,"required":true}', null, 100],
+        ['game',      'Game',           'autocomplete_list','{"listTypeId":"game","emptyValue":"N"}',       null, 90],
+        ['music',     'Music',          'autocomplete_list','{"listTypeId":"music","emptyValue":"N","required":true}', null, 100],
         ['grateful',  'Grateful',       'list',             '{"required":true}',                           null, 110],
         ['learn',     'Learn (Ctrl+Y)', 'list',             '{"required":true}',                           null, 120],
-        ['exercise',  'Exercise',       'autocomplete_list','{"listTypeId":"exercise","defaultN":true,"required":true}', null, 130],
+        ['exercise',  'Exercise',       'autocomplete_list','{"listTypeId":"exercise","emptyValue":"N","required":true}', null, 130],
         ['remember',  'Remember',       'float',            '{"max":10,"required":true}',                  null, 140],
         ['dayRating', 'Day rating',     'float',            '{"max":10,"required":true}',                  null, 150],
         ['feeling',   'Feeling',        'int',              '{"max":100,"required":true}',                 null, 160],

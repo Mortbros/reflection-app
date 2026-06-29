@@ -6,7 +6,7 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 import Pages from 'vite-plugin-pages'
 import { sqlitePlugin } from './vite-plugin-sqlite'
 
-const DB_PATH = 'C:\\Users\\sandr\\OneDrive\\Personal\\Reflection\\mappings.db'
+const DB_PATH = 'C:\\Users\\sandr\\OneDrive\\Personal\\Reflection\\reflection-app-data\\mappings.db'
 
 // https://vite.dev/config/
 export default defineConfig({

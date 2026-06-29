@@ -179,7 +179,7 @@ function getDefaultValue(field: FormSchemaField): unknown {
     case 'shortcode_text': return ''
     case 'time_display': return ''
     case 'list': return []
-    case 'autocomplete_list': return cfg.defaultN ? ['N'] : []
+    case 'autocomplete_list': return []
     default: return ''
   }
 }
@@ -194,8 +194,10 @@ watch(schemaFields, (fields) => {
     if ((f.field_type === 'list' || f.field_type === 'autocomplete_list') && typeof val === 'string') {
       val = (val as string) ? (val as string).split(', ').filter(Boolean) : []
     }
-    if (f.field_type === 'autocomplete_list' && f.config?.defaultN && Array.isArray(val) && (val as string[]).length === 0) {
-      val = ['N']
+    // Strip the emptyValue sentinel if it was stored as a real value (backwards compat)
+    const emptyVal = (f.config?.emptyValue as string | undefined) ?? (f.config?.defaultN ? 'N' : undefined)
+    if (f.field_type === 'autocomplete_list' && Array.isArray(val) && emptyVal) {
+      val = (val as string[]).filter(v => v !== emptyVal)
     }
     data[f.field_key] = val
   }
@@ -302,10 +304,18 @@ function focusFieldByError(label: string) {
 const copySuccess = ref(false)
 const sleepTimeMessage = ref('')
 
+function getEmptyValue(field: FormSchemaField): string | undefined {
+  return (field.config?.emptyValue as string | undefined) ?? (field.config?.defaultN ? 'N' : undefined)
+}
+
 function serializeField(field: FormSchemaField, overrideSleep?: string): string {
   if (field.field_key === 'sleep' && overrideSleep !== undefined) return overrideSleep
   const val = formData.value[field.field_key]
-  if (Array.isArray(val)) return field.config?.defaultN ? (val as string[]).join(', ') || 'N' : (val as string[]).join(', ')
+  if (Array.isArray(val)) {
+    const items = (val as string[]).filter(Boolean)
+    if (items.length === 0) return getEmptyValue(field) ?? ''
+    return items.join(', ')
+  }
   return val == null ? '' : String(val)
 }
 
@@ -313,7 +323,8 @@ const persistNewListValues = (field: FormSchemaField) => {
   const listTypeId = field.config?.listTypeId as string | undefined
   if (!listTypeId) return
   const values = formData.value[field.field_key] as string[]
-  const SKIP = ['N', 'n', '']
+  const emptyVal = getEmptyValue(field)
+  const SKIP = ['', ...(emptyVal ? [emptyVal, emptyVal.toLowerCase()] : [])]
   const existing = dbSuggestions.value.get(listTypeId) ?? []
   for (const v of values) {
     if (SKIP.includes(v.trim())) continue
@@ -414,10 +425,10 @@ onMounted(async () => {
   <VContainer fluid>
     <VRow justify="center">
       <VCol cols="12" md="10" lg="8" xl="6">
-        <VCard variant="outlined" class="pa-6" style="min-height: 100vh;">
+        <VCard variant="outlined" class="pa-1 pa-sm-6 form-card" style="min-height: 100vh;">
           <VProgressLinear v-if="!dbLoaded" indeterminate color="primary" height="2" />
           <VCardText>
-            <div class="d-flex flex-column ga-6">
+            <div class="d-flex flex-column ga-3">
               <div class="d-flex align-center ga-2 mb-4">
                 <VBtn icon="mdi-help-circle-outline" variant="text" size="small" @click="router.push('/help')" />
                 <div class="d-flex justify-center flex-wrap ga-4 flex-grow-1">
@@ -430,6 +441,10 @@ onMounted(async () => {
                     Clear
                   </VBtn>
                 </div>
+                <VBtn icon="mdi-youtube" variant="text" size="small" title="YouTube history (Ctrl+Y)"
+                  @click="window.open('https://www.youtube.com/feed/history', '_blank')" />
+                <VBtn icon="mdi-google" variant="text" size="small" title="My Activity (Ctrl+G)"
+                  @click="window.open('https://myactivity.google.com/myactivity?pli=1', '_blank')" />
                 <VBtn icon="mdi-cog" variant="text" size="small" @click="router.push('/settings')" />
               </div>
 
@@ -449,9 +464,9 @@ onMounted(async () => {
                 <template v-if="row[0].field_type === 'date'" />
 
                 <!-- Multi-field row -->
-                <VRow v-else-if="row.length > 1" class="py-0">
+                <VRow v-else-if="row.length > 1" no-gutters class="ga-3" style="flex-wrap: nowrap">
                   <VCol v-for="field in row" :key="field.field_key"
-                    :cols="12" :sm="Math.floor(12 / row.length)" class="pt-1 pb-0">
+                    style="flex: 1 1 0; min-width:0">
                     <component
                       :is="getFieldComponent(field.field_type)"
                       v-bind="getFieldProps(field)"
@@ -529,9 +544,6 @@ onMounted(async () => {
                   Clear
                 </VBtn>
               </div>
-              <div class="d-flex justify-center" style="color: gray;">
-                Ctrl+S copy · Ctrl+Y YouTube · Ctrl+G My Activity
-              </div>
             </div>
           </VCardText>
         </VCard>
@@ -593,6 +605,13 @@ onMounted(async () => {
 
 .v-card {
   max-width: 100%;
+}
+
+@media (max-width: 599px) {
+  .form-card {
+    border: none !important;
+    box-shadow: none !important;
+  }
 }
 
 .ga-6 {
