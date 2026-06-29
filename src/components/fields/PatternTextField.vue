@@ -380,6 +380,7 @@ const acceptSuggestion = async (suggestion: Suggestion) => {
   clearDropdown();
   const newCursor = prefix.length + suggestion.expansion.length + 1;
   await nextTick();
+  textarea.focus();
   textarea.setSelectionRange(newCursor, newCursor);
 };
 
