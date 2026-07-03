@@ -10,6 +10,7 @@ const props = defineProps<{
   onPrevious?: () => void
   required?: boolean
   autoSelect?: boolean
+  emptyValue?: string
 }>()
 
 const emit = defineEmits<{
@@ -20,6 +21,12 @@ const comboboxRef = ref<InstanceType<typeof VCombobox> | null>(null)
 const isInternalUpdate = ref(false)
 const localValue = ref<string[]>([])
 const searchText = ref('')
+const isFocused = ref(false)
+
+// Show the emptyValue (e.g. "N") as a placeholder only while unfocused and empty
+const displayPlaceholder = computed(() =>
+  !isFocused.value && localValue.value.length === 0 ? props.emptyValue : undefined
+)
 
 const getNativeInput = (): HTMLInputElement | null =>
   comboboxRef.value?.$el?.querySelector('input') ?? null
@@ -91,11 +98,12 @@ function nativeKeydown(e: KeyboardEvent) {
       props.onNext?.()
       return
     }
-    // Always pick the top filtered suggestion; never add free text via Enter
+    // Pick the top filtered suggestion, or commit typed text as a free-text chip
     if (filteredSuggestions.value.length > 0) {
       addChip(filteredSuggestions.value[0])
+    } else {
+      addChip(searchText.value.trim().replace(/,$/, ''))
     }
-    // No match → do nothing (user must use ', ' to add free text)
     return
   }
 
@@ -161,7 +169,11 @@ onUnmounted(() => {
     hide-details
     autocomplete="off"
     class="comma-list-field"
+    :placeholder="displayPlaceholder"
+    persistent-placeholder
     @update:model-value="handleUpdate"
+    @focus="isFocused = true"
+    @blur="isFocused = false"
   />
 </template>
 

@@ -59,6 +59,7 @@ function getFieldProps(field: FormSchemaField): Record<string, unknown> {
     case 'autocomplete_list':
       base.suggestions = dbSuggestions.value.get(cfg.listTypeId as string) ?? []
       if (cfg.autoSelect === false) base.autoSelect = false
+      if (cfg.emptyValue) base.emptyValue = cfg.emptyValue
       break
   }
   return base
