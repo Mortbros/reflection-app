@@ -386,8 +386,13 @@ const acceptSuggestion = async (suggestion: Suggestion) => {
   clearDropdown();
   const newCursor = prefix.length + display.length + 1;
   await nextTick();
-  textarea.focus();
-  textarea.setSelectionRange(newCursor, newCursor);
+  // Re-query: the value update may have re-rendered/replaced the textarea node,
+  // making the captured reference stale
+  const ta = getTextarea();
+  if (ta) {
+    ta.focus();
+    ta.setSelectionRange(newCursor, newCursor);
+  }
 };
 
 // ── Input handler ─────────────────────────────────────────────────────────────
