@@ -158,6 +158,13 @@ expandToken(token, mappings, listValues)
 
 Frecency bonus = `min(score × 10, 90)` — stays below the 100-point tier gap so it only breaks ties within a tier.
 
+### Accepting suggestions
+
+- **Enter / Tab** accepts the highlighted suggestion (or the top one if none highlighted)
+- **Space** with an arrow-key-highlighted suggestion accepts it; otherwise Space triggers the default token expansion via `expandWithFrecency`
+- All accept paths (including mouse click) apply sentence-start capitalization: first letter is uppercased when the preceding text is empty or ends with `.`, `!`, `?`
+- After accepting, the textarea is **re-queried** (`getTextarea()`) before refocusing — the value update can re-render the node, so a captured reference may be detached
+
 ### Mode toggle
 
 Escape (first press): closes dropdown  
@@ -239,8 +246,8 @@ getNativeInput()?.addEventListener('keydown', nativeKeydown, { capture: true })
 ```
 
 This lets us `stopPropagation()` before VCombobox sees the event. Key behaviours:
-- **Enter** — picks top filtered suggestion; if empty input, calls `onNext()`; never adds free text
-- **`, ` (comma + space)** — adds typed text as a free-text chip (the only way to add values not in the list)
+- **Enter** — picks top filtered suggestion, or commits typed text as a free-text chip if nothing matches; if input is empty, calls `onNext()`
+- **`, ` (comma + space)** — adds typed text as a free-text chip
 - **Backspace** (empty input) — removes last chip with single press
 - **Tab** — commits top suggestion (or free text if no match), then advances
 
@@ -248,7 +255,7 @@ After any chip add, `clearInput()` resets both the reactive `searchText` ref AND
 
 ### emptyValue config
 
-`autocomplete_list` fields support `emptyValue` in their config JSON. When the field has no chips selected, the clipboard output uses `emptyValue` instead of blank. The field itself always displays empty — no placeholder chip.
+`autocomplete_list` fields support `emptyValue` in their config JSON. When the field has no chips selected, the clipboard output uses `emptyValue` instead of blank. The field shows `emptyValue` as a placeholder while unfocused and empty (via `persistent-placeholder`); it disappears on focus so typing starts clean.
 
 - Game, Music, Exercise all use `emptyValue: "N"` (seeded and migrated)
 - `getEmptyValue(field)` helper in `DailyTrackingForm` reads `config.emptyValue` (also accepts legacy `defaultN: true` for backward compat)
@@ -268,6 +275,9 @@ After any chip add, `clearInput()` resets both the reactive `searchText` ref AND
 - **Form restore**: `loadFormData()` must be called BEFORE `await loadDb()` in `onMounted`. The `schemaFields` watcher fires after schema loads and initialises defaults — if saved data isn't already in `formData` by then, it gets overwritten.
 - **Clipboard output order**: time_display field IS included; time and happened fields are swapped in output order (happened comes before time) regardless of schema order.
 - **`defaultN` is deprecated** — use `emptyValue` instead. Backward compat remains in `getEmptyValue()`.
+- **Grouped field rows** (`row_group`) use `flex: 1 1 0; min-width: 0` on each VCol with `flex-wrap: nowrap` on the VRow — equal widths, never wraps. Don't reintroduce breakpoint cols there.
+- **Mobile layout**: the form card is `pa-1 pa-sm-6` with border/shadow removed under 600px (`.form-card` media query) for full-bleed width.
+- **Form header** has YouTube (`mdi-youtube`) and My Activity (`mdi-google`) icon buttons mirroring the Ctrl+Y / Ctrl+G shortcuts handled in `App.vue` (Ctrl+S dispatches the `app:copy` custom event).
 
 ---
 
