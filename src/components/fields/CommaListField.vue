@@ -49,11 +49,16 @@ function save(val: string[]) {
   emit('update:modelValue', val.filter(Boolean))
 }
 
-// Only handles syncing when VCombobox itself adds items (e.g. clicking a suggestion)
+// Handles VCombobox committing a selection itself (mouse click on a menu item,
+// or arrow-key navigation + Enter — arrow keys move real focus into the menu
+// list, so our capture-phase input listener never sees that Enter).
 function handleUpdate(val: unknown) {
   if (!Array.isArray(val)) return
   localValue.value = (val as string[]).filter(Boolean)
   save(localValue.value)
+  // Refocus the input: after a menu selection focus is left on the list item
+  clearInput()
+  nextTick(() => getNativeInput()?.focus())
 }
 
 const filteredSuggestions = computed(() => {
