@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'fs'
 import type { IncomingMessage, ServerResponse } from 'http'
 import type { Plugin } from 'vite'
 
@@ -116,6 +116,12 @@ export function sqlitePlugin(dbPath: string): Plugin {
     const SQL = await initSqlJs()
 
     if (existsSync(dbPath)) {
+      if (statSync(dbPath).isDirectory()) {
+        throw new Error(
+          `[sqlite] DB path points to a directory, not a file: ${dbPath}\n` +
+          `Set the DB_PATH env var to a .db file path (it will be created if missing).`
+        )
+      }
       db = new SQL.Database(readFileSync(dbPath))
     } else {
       db = new SQL.Database()
